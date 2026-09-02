@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The one non-negotiable architectural boundary (implementation-plan.md §4):
+    // `src/core/**` is pure. Dropping "DOM" from `lib` and clearing `types` turns
+    // every reference to `document`, `window`, `HTMLElement`, `fetch`, `crypto`,
+    // `localStorage`, ... inside core into a hard compile error rather than a
+    // convention someone can forget. `npm run typecheck:core` is that boundary.
+    "lib": ["ES2023"],
+    "types": [],
+    "jsx": "preserve"
+  },
+  "include": ["src/core"]
+}
