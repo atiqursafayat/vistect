@@ -1,0 +1,516 @@
+/*
+ * Vistect's stylesheet. Hand-written, one file, custom properties at the top (plan §4: no
+ * CSS framework, no CSS-in-JS).
+ *
+ * Two rules that are not negotiable here:
+ *
+ *   1. `:focus-visible` is never suppressed anywhere in this file, and there is no
+ *      `outline: none`. A keyboard user who cannot see the focus ring cannot use the app.
+ *   2. The application chrome is sized in `rem` so browser text scaling moves it, while
+ *      `.page` and everything inside it stays in `px`. The page is a US Letter sheet whose
+ *      geometry the validation code measures (§16.2, D0-2); if a user's font size changed the
+ *      page's dimensions, every measurement taken against it would be wrong.
+ */
+
+:root {
+  --paper: #ffffff;
+  --ink: #102a43;
+  --muted: #486581;
+  --accent: #0b6e6e;
+  --line: #cbd5e0;
+  --surface: #f7f9fb;
+  --surface-2: #eef2f6;
+  --warn: #8a4b08;
+  --focus: #0b6e6e;
+
+  --gap: 1rem;
+  --radius: 4px;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0f1720;
+    --ink: #e6edf3;
+    --muted: #a7b6c2;
+    --accent: #5fd4d4;
+    --line: #33414e;
+    --surface: #16202a;
+    --surface-2: #1e2a35;
+    --warn: #ffb86b;
+    --focus: #5fd4d4;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.5;
+  /* Not px: this is the value a user's own text-size preference multiplies. */
+  font-size: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--accent);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.25;
+  margin: 0 0 0.5rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+h2 {
+  font-size: 1.2rem;
+}
+h3 {
+  font-size: 1.05rem;
+}
+
+button,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+}
+
+button {
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+textarea {
+  width: 100%;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+code,
+pre {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+pre {
+  overflow: auto;
+  max-height: 20rem;
+  padding: 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * Skip links: off screen until focused, then the first thing on the page. They are a real
+ * list so a screen reader announces how many there are before reading them.
+ */
+.skip-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skip-links a {
+  position: absolute;
+  left: -9999px;
+  z-index: 10;
+}
+
+.skip-links a:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--paper);
+  border: 2px solid var(--focus);
+  border-radius: var(--radius);
+}
+
+header {
+  padding: var(--gap);
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+header p {
+  margin: 0.25rem 0;
+  max-width: 70ch;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+/*
+ * The one live region (§7). Visible, not hidden: a sighted collaborator and a demo audience
+ * see the same sentence the screen reader reads, and the announcement is never the only
+ * carrier of a status that colour would otherwise have to convey (§21.2).
+ */
+.announcer {
+  min-height: 2.5rem;
+  padding: 0.5rem var(--gap);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.announcer p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.empty {
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(16rem, 24rem);
+  gap: var(--gap);
+  align-items: start;
+  padding: var(--gap);
+}
+
+/* One column below 60rem. The landmark order is the reading order either way. */
+@media (max-width: 60rem) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.layout > nav,
+.layout > main,
+.side > section,
+#activity,
+#console {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--gap);
+}
+
+#activity,
+#console {
+  margin: 0 var(--gap) var(--gap);
+}
+
+.side {
+  display: grid;
+  gap: var(--gap);
+}
+
+/* The tree is one tab stop; the roving tabindex in Navigator.tsx decides which row. */
+.tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  padding: 0.3rem 0.4rem;
+  border-left: 3px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.row-object {
+  padding-left: 1.5rem;
+  color: var(--muted);
+}
+
+.row:hover {
+  background: var(--surface-2);
+}
+
+/*
+ * Selection is announced through `aria-selected`, so the visual treatment is free to be
+ * whatever reads best — but it is a weight and a bar as well as a tint, never colour alone.
+ */
+.row[aria-selected='true'] {
+  background: var(--surface-2);
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/*
+ * The page, and everything on it, in px — see the note at the top of this file. A page wider
+ * than the pane scrolls; `overflow: auto` here is the whole of the response to that, and there
+ * is deliberately no `transform: scale()` (PageCanvas.tsx explains why).
+ */
+.canvas {
+  display: grid;
+  gap: var(--gap);
+  justify-items: start;
+  overflow: auto;
+}
+
+/*
+ * No padding. Object bounds are page coordinates that already include the 72px margin
+ * (`contentBox()` starts at x: 72, y: 72), so padding here would shift every object by that
+ * margin twice and every measurement taken against the page would be wrong.
+ */
+.page {
+  position: relative;
+  padding: 0;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
+  overflow: hidden;
+}
+
+/*
+ * `margin: 0` is not cosmetic. An `h2` or `p` keeps its default margin otherwise, which moves
+ * the rendered text out of the box whose height `estimateTextHeight` predicted — turning every
+ * geometry finding into noise about our own stylesheet.
+ */
+.object {
+  position: absolute;
+  margin: 0;
+}
+
+/* 22px and 4px are `bulletIndentPx` and the inter-item gap in core/layout.ts, exactly. */
+.text-list {
+  padding-inline-start: 22px;
+}
+
+.text-list li {
+  margin-block-end: 4px;
+}
+
+.text-list li:last-child {
+  margin-block-end: 0;
+}
+
+.text-quote p {
+  margin: 0;
+}
+
+/*
+ * A placeholder for an object kind Day 1 cannot construct yet. It looks unfinished on purpose:
+ * a neat grey rectangle reads as a design decision, and this is not one.
+ */
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--line);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* An object with no place in the reading order (§10.3). Marked, and never hidden. */
+.object[data-in-reading-order='false'] {
+  outline: 2px dashed var(--warn);
+  outline-offset: 1px;
+}
+
+.explorer p {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+}
+
+/*
+ * Term and value, not a table: eleven labelled facts about one object are a description list,
+ * and a screen reader reads them as pairs without any help from us.
+ */
+.fields {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.fields dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.activity {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.activity-entry {
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.activity-head {
+  margin: 0;
+}
+
+/*
+ * The outcome is a word — "Applied", "Read", "Refused" — before it is a border colour, so the
+ * colour is only ever a second copy of information already in the text (§21.2).
+ */
+.activity-outcome {
+  font-weight: 600;
+}
+
+.activity-applied {
+  border-left-color: var(--accent);
+}
+
+.activity-read {
+  border-left-color: var(--muted);
+}
+
+.activity-rejected {
+  border-left-color: var(--warn);
+}
+
+.activity-detail {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.console {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 70ch;
+}
+
+.console p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+.console h3 {
+  margin: 0;
+}
+
+/* Wraps, so the demo buttons stay reachable at any window width or text size. */
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Label above control: the only arrangement that survives a 200% text-size increase. */
+.field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.field select {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.field p {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.outcome {
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+}
+
+/*
+ * Windows High Contrast and its equivalents. The system palette replaces ours, which is the
+ * point — so every distinction that mattered has to survive losing our colours.
+ *
+ * It does, because none of them was carried by colour in the first place: selection is a weight
+ * and a bar, an activity outcome is the word "Applied", "Read" or "Refused", and a stray object
+ * says "Not in the reading order" in the navigator. What is left here is making sure the
+ * remaining borders and outlines land on system colours that are actually visible, rather than
+ * on a `currentColor` that blends into the text beside them.
+ *
+ * `.page` is deliberately *not* given `forced-color-adjust: none`. A user who asked the OS for
+ * forced colours has asked for them everywhere; keeping the document's theme colours here would
+ * be choosing our fidelity over their legibility. The theme is still reported in the object
+ * explorer as text, and the PDF export is unaffected.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+
+  .row[aria-selected='true'] {
+    border-left-color: Highlight;
+  }
+
+  .object[data-in-reading-order='false'] {
+    outline-color: Highlight;
+  }
+
+  .skip-links a:focus {
+    border-color: Highlight;
+  }
+}
+
+/*
+ * There is no `transition`, `animation` or `scroll-behavior: smooth` anywhere in this file, so
+ * there is nothing here to reduce. This block is the guard for the one that gets added later
+ * without this being thought about.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
