@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Independent visual authorship for blind creators. WebMCP-native accessible document studio.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20.19"
   },
