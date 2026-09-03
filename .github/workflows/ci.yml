@@ -1,0 +1,78 @@
+# Vistect CI — implementation-plan.md §9: typecheck → lint → unit → build → e2e.
+#
+# Two things here are deliberate rather than conventional:
+#
+#   1. **The WebMCP probe runs before the app is even built.** §10's first risk row is "the
+#      WebMCP API moves again mid-sprint", and the probe is the instrument for it: it asserts
+#      the namespace, the secure-context requirement and the annotation round-trip against a
+#      real flagged Chrome, and exits non-zero on a change. If Chrome moves the API, this job
+#      says so in one line instead of leaving us to read a failing UI test.
+#   2. **Nothing is mocked, and the E2E job installs real Chrome** (`--with-deps chrome`), not
+#      bundled Chromium. WebMCP is behind a Blink flag in Chrome only. v1's WebMCP layer stayed
+#      green for 2,819 lines against a mock; the whole point of running this in CI from Day 1 is
+#      that a green tick here means the tools reached a browser.
+#
+# `format:check` sits in the static job because a formatting diff is the cheapest possible red.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: typecheck, lint, unit, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test
+      # `build` re-runs typecheck by definition (see package.json) — kept because the plan's
+      # gate is the built artefact, and a Vite build can fail where `tsc` does not.
+      - run: npm run build
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  e2e:
+    name: WebMCP registration (real flagged Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      # The namespace check, ahead of the app: a one-line failure beats a red UI test.
+      - run: npm run probe:webmcp
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
