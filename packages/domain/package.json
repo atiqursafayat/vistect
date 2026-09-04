@@ -2,6 +2,7 @@
   "name": "@vistect/domain",
   "version": "0.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -47,6 +48,14 @@
     "./toolSchemas": {
       "types": "./dist/toolSchemas/index.d.ts",
       "import": "./dist/toolSchemas/index.js"
+    },
+    "./collections": {
+      "types": "./dist/collections/index.d.ts",
+      "import": "./dist/collections/index.js"
+    },
+    "./text": {
+      "types": "./dist/text/index.d.ts",
+      "import": "./dist/text/index.js"
     }
   },
   "scripts": {

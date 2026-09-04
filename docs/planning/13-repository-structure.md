@@ -40,7 +40,7 @@ vistect/
 ├── .github/workflows/ci.yml      # typecheck→lint→unit→build→e2e(+axe)→audit
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json            # strict, project references
-├── LICENSE (MIT) · README.md
+├── LICENSE (Apache-2.0) · README.md
 └── vistect_pts.md                # source spec (kept for reference)
 ```
 
