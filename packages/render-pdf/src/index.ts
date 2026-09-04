@@ -1,29 +1,57 @@
 // ============================================================================
-// PDF Renderer - pdf-lib deterministic renderer from resolved layout
+// PDF Renderer — deterministic output from resolved layout
 // ============================================================================
+//
+// Renders the *same* `ResolvedLayout` the HTML preview uses, so a blind author who
+// approved the preview gets a PDF with matching geometry (ADR-003, AC F-5.x §1).
+//
+// Determinism requirements:
+//   - No `Date.now()`; timestamps come from the project.
+//   - Iteration follows `layout.pages` and z-order, never object key order.
+//   - Only the 14 standard PDF fonts, so no font file can vary the output.
+//
+// Coordinate systems differ: layout is top-left origin (like the DOM), PDF is
+// bottom-left. `toPdfY` is the single conversion point.
 
-import { PDFDocument, rgb, StandardFonts, PDFFont, PDFPage, PDFImage, rgb as pdfRgb } from 'pdf-lib';
-import type { DocumentProject, Bounds, PageTemplate } from '@vistect/domain/schema';
-import type { ResolvedLayout, ResolvedPage, ResolvedObject } from '@vistect/render-html';
 
-// ============================================================================
-// PDF Constants
-// ============================================================================
+import type {
+  Chart,
+  Diagram,
+  DocumentObject,
+  DocumentProject,
+} from '@vistect/domain/schema';
+import type { ResolvedLayout, ResolvedObject, ResolvedPage } from '@vistect/render-html';
+import { PAGE_SIZE } from '@vistect/render-html';
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 
-const A4_WIDTH = 595.28; // points (72 DPI)
-const A4_HEIGHT = 841.89;
-const MARGIN = 72; // 1 inch
-const CONTENT_WIDTH = A4_WIDTH - 2 * MARGIN;
-const CONTENT_HEIGHT = A4_HEIGHT - 2 * MARGIN;
+const PAGE_WIDTH = PAGE_SIZE.width;
+const PAGE_HEIGHT = PAGE_SIZE.height;
 
-// ============================================================================
-// PDF Renderer
-// ============================================================================
+/** Reserved band at the page foot for the page number. */
+const FOOTER_BAND = 36;
 
 export interface PDFRenderOptions {
+  /** Embed document metadata (title, subject, keywords). Default true. */
   includeMetadata?: boolean;
-  embedFonts?: boolean;
+  /** Use PDF object streams to reduce size. Default true. */
   compress?: boolean;
+}
+
+interface FontSet {
+  regular: PDFFont;
+  bold: PDFFont;
+  oblique: PDFFont;
+  boldOblique: PDFFont;
+}
+
+/** Text style for one object role. */
+interface TextStyle {
+  font: PDFFont;
+  size: number;
+  leading: number;
+  color: ReturnType<typeof rgb>;
+  /** Left indent in points, e.g. for list markers. */
+  indent: number;
 }
 
 export async function renderProjectPDF(
@@ -32,514 +60,487 @@ export async function renderProjectPDF(
   options: PDFRenderOptions = {}
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
-  pdfDoc.setTitle(project.title);
-  pdfDoc.setSubject(project.intentContract.purpose);
-  pdfDoc.setKeywords([project.documentType, project.language, ...project.intentContract.requiredVisuals]);
-  pdfDoc.setAuthor('Vistect');
-  pdfDoc.setCreator('Vistect WebMCP Workspace');
-  pdfDoc.setCreationDate(new Date(project.createdAt));
-  pdfDoc.setModificationDate(new Date(project.updatedAt));
 
-  // Register fonts
-  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const obliqueFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
-  const boldObliqueFont = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
-
-  // Render each page
-  for (let i = 0; i < layout.pages.length; i++) {
-    const pageLayout = layout.pages[i];
-    const page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
-    await renderPage(page, pageLayout, project, {
-      regularFont,
-      boldFont,
-      obliqueFont,
-      boldObliqueFont,
-    });
+  if (options.includeMetadata !== false) {
+    pdfDoc.setTitle(project.title);
+    pdfDoc.setSubject(project.intentContract.purpose);
+    pdfDoc.setKeywords([
+      project.documentType,
+      project.language,
+      ...project.intentContract.requiredVisuals,
+    ]);
+    pdfDoc.setAuthor('Vistect');
+    pdfDoc.setCreator('Vistect');
+    // Project timestamps, not wall-clock: two exports of one version must be
+    // byte-identical so the manifest hash is meaningful.
+    pdfDoc.setCreationDate(new Date(project.createdAt));
+    pdfDoc.setModificationDate(new Date(project.updatedAt));
   }
 
-  // Add page numbers
+  pdfDoc.setLanguage(project.language);
+
+  const fonts: FontSet = {
+    regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
+    bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+    oblique: await pdfDoc.embedFont(StandardFonts.HelveticaOblique),
+    boldOblique: await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique),
+  };
+
+  for (const pageLayout of layout.pages) {
+    const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    renderPage(page, pageLayout, project, fonts);
+  }
+
   const pages = pdfDoc.getPages();
-  for (let i = 0; i < pages.length; i++) {
-    addPageNumber(pages[i], i + 1, pages.length, regularFont);
+  for (const [index, page] of pages.entries()) {
+    drawPageNumber(page, index + 1, pages.length, fonts.regular);
   }
 
-  // Save
-  const pdfBytes = await pdfDoc.save({
+  return pdfDoc.save({
     useObjectStreams: options.compress !== false,
     addDefaultPage: false,
   });
-
-  return pdfBytes;
 }
 
-interface FontSet {
-  regularFont: PDFFont;
-  boldFont: PDFFont;
-  obliqueFont: PDFFont;
-  boldObliqueFont: PDFFont;
+/** Converts a top-left-origin y plus height into a PDF bottom-left origin y. */
+function toPdfY(y: number, height: number): number {
+  return PAGE_HEIGHT - y - height;
 }
 
-async function renderPage(
+function renderPage(
   page: PDFPage,
   pageLayout: ResolvedPage,
   project: DocumentProject,
   fonts: FontSet
-): Promise<void> {
-  const { regularFont, boldFont, obliqueFont, boldObliqueFont } = fonts;
-
-  // Draw page background
-  page.drawRectangle({
-    x: 0,
-    y: 0,
-    width: A4_WIDTH,
-    height: A4_HEIGHT,
-    color: rgb(1, 1, 1),
-  });
-
-  // Draw margins
-  page.drawRectangle({
-    x: MARGIN,
-    y: MARGIN,
-    width: CONTENT_WIDTH,
-    height: CONTENT_HEIGHT,
-    borderColor: rgb(0.9, 0.9, 0.9),
-    borderWidth: 0.5,
-  });
-
-  // Render objects in z-order
-  const sortedObjects = [...pageLayout.objects].sort((a, b) => a.zIndex - b.zIndex);
-
-  for (const robj of sortedObjects) {
-    await renderObject(page, robj, project, fonts);
+): void {
+  // Ascending z-index so higher layers paint last.
+  const ordered = [...pageLayout.objects].sort((a, b) => a.zIndex - b.zIndex);
+  for (const resolved of ordered) {
+    renderObject(page, resolved, project, fonts);
   }
-
-  // Page footer with template name
-  page.drawText(pageLayout.template, {
-    x: MARGIN,
-    y: 36,
-    size: 8,
-    font: regularFont,
-    color: rgb(0.5, 0.5, 0.5),
-  });
 }
 
-async function renderObject(
+function renderObject(
   page: PDFPage,
-  robj: ResolvedObject,
+  resolved: ResolvedObject,
   project: DocumentProject,
   fonts: FontSet
-): Promise<void> {
-  const { object, resolvedBounds } = robj;
-  const { regularFont, boldFont, obliqueFont, boldObliqueFont } = fonts;
-
-  // Convert bounds to PDF coordinates (origin bottom-left)
-  const x = MARGIN + resolvedBounds.x;
-  const y = A4_HEIGHT - MARGIN - resolvedBounds.y - resolvedBounds.h;
+): void {
+  const { object, resolvedBounds } = resolved;
+  const x = resolvedBounds.x;
+  const y = toPdfY(resolvedBounds.y, resolvedBounds.h);
   const w = resolvedBounds.w;
   const h = resolvedBounds.h;
 
   switch (object.kind) {
     case 'text':
-      await renderTextObject(page, object, x, y, w, h, fonts);
+      drawTextObject(page, object, x, y, w, h, fonts);
       break;
     case 'image':
-      await renderImageObject(page, object, project, x, y, w, h);
+      drawImagePlaceholder(page, object, project, x, y, w, h, fonts);
       break;
     case 'chart':
-      await renderChartObject(page, object, project, x, y, w, h, fonts);
+      drawChartObject(page, object, project, x, y, w, h, fonts);
       break;
     case 'diagram':
-      await renderDiagramObject(page, object, project, x, y, w, h, fonts);
+      drawDiagramObject(page, object, project, x, y, w, h, fonts);
       break;
     case 'table':
-      await renderTableObject(page, object, x, y, w, h, fonts);
+      drawTableObject(page, object, x, y, w, h, fonts);
       break;
     case 'icon':
     case 'shape':
-      // Icons and shapes - render as simple placeholders
-      page.drawRectangle({ x, y, width: w, height: h, borderColor: rgb(0.8, 0.8, 0.8), borderWidth: 0.5 });
-      page.drawText(`[${object.kind}: ${object.purpose}]`, { x: x + 4, y: y + h - 12, size: 8, font: regularFont, color: rgb(0.5, 0.5, 0.5) });
+      drawOutlinePlaceholder(page, `${object.kind}: ${object.purpose}`, x, y, w, h, fonts);
       break;
   }
 }
 
-async function renderTextObject(
-  page: PDFPage,
-  object: any, // TextObject
-  x: number,
-  y: number,
-  w: number,
-  h: number,
+// ============================================================================
+// Text
+// ============================================================================
+
+/** Heading point sizes by level. */
+const HEADING_SIZES: Readonly<Record<1 | 2 | 3 | 4, number>> = { 1: 20, 2: 18, 3: 14, 4: 12 };
+
+function textStyleFor(
+  object: Extract<DocumentObject, { kind: 'text' }>,
   fonts: FontSet
-): Promise<void> {
-  const { regularFont, boldFont, obliqueFont, boldObliqueFont } = fonts;
-  const role = object.role;
-  const content = object.content;
+): TextStyle {
+  const body = { font: fonts.regular, size: 10, leading: 14, color: rgb(0.1, 0.1, 0.1), indent: 0 };
 
-  // Select font based on role
-  let font = regularFont;
-  let size = 10;
-  let leading = 14;
-  let color = rgb(0.1, 0.1, 0.1);
-
-  switch (role) {
-    case 'heading':
-      font = boldFont;
-      size = { 1: 20, 2: 18, 3: 14, 4: 12 }[object.headingLevel || 1] || 14;
-      leading = size * 1.3;
-      color = rgb(0.1, 0.1, 0.2);
-      break;
-    case 'paragraph':
-      font = regularFont;
-      size = 10;
-      leading = 14;
-      break;
-    case 'bulleted-list':
-    case 'numbered-list':
-      font = regularFont;
-      size = 10;
-      leading = 14;
-      break;
+  switch (object.role) {
+    case 'heading': {
+      const level = Math.min(4, Math.max(1, object.headingLevel ?? 1)) as 1 | 2 | 3 | 4;
+      const size = HEADING_SIZES[level];
+      return { font: fonts.bold, size, leading: size * 1.3, color: rgb(0.1, 0.1, 0.2), indent: 0 };
+    }
     case 'quotation':
-      font = obliqueFont;
-      size = 10;
-      leading = 14;
-      color = rgb(0.2, 0.2, 0.3);
-      break;
+      return { ...body, font: fonts.oblique, color: rgb(0.2, 0.2, 0.3), indent: 16 };
     case 'callout':
-      font = regularFont;
-      size = 10;
-      leading = 14;
-      color = rgb(0.15, 0.15, 0.25);
-      break;
+      return { ...body, color: rgb(0.15, 0.15, 0.25), indent: 8 };
     case 'statistic-card':
-      font = boldFont;
-      size = 14;
-      leading = 18;
-      color = rgb(0.1, 0.1, 0.1);
-      break;
+      return { font: fonts.bold, size: 14, leading: 18, color: rgb(0.1, 0.1, 0.1), indent: 0 };
     case 'caption':
-      font = obliqueFont;
-      size = 9;
-      leading = 12;
-      color = rgb(0.4, 0.4, 0.4);
-      break;
+      // 0.42 luminance against white is ~4.6:1, clearing WCAG AA for small text.
+      return { font: fonts.oblique, size: 9, leading: 12, color: rgb(0.35, 0.35, 0.35), indent: 0 };
     case 'footnote':
     case 'source-note':
-      font = regularFont;
-      size = 8;
-      leading = 11;
-      color = rgb(0.5, 0.5, 0.5);
-      break;
+      return { font: fonts.regular, size: 8, leading: 11, color: rgb(0.35, 0.35, 0.35), indent: 0 };
     case 'hyperlink':
-      font = regularFont;
-      size = 10;
-      leading = 14;
-      color = rgb(0, 0.3, 0.8);
-      break;
-    default:
-      font = regularFont;
-      size = 10;
-      leading = 14;
-  }
-
-  // Handle list items
-  const lines = wrapText(content, font, size, w - 16);
-
-  let currentY = y + h - leading;
-  for (let i = 0; i < lines.length; i++) {
-    if (currentY < y + leading) break; // Prevent overflow
-
-    const line = lines[i];
-    const isListItem = (role === 'bulleted-list' || role === 'numbered-list') && i === 0;
-    const prefix = isListItem ? (role === 'bulleted-list' ? '•  ' : '1.  ') : '';
-    const drawX = x + (isListItem ? 16 : 8);
-    const drawW = w - (isListItem ? 24 : 16);
-
-    page.drawText(prefix + line, {
-      x: drawX,
-      y: currentY,
-      size,
-      font,
-      color,
-      maxWidth: drawW,
-    });
-
-    currentY -= leading;
+      return { ...body, color: rgb(0, 0.25, 0.65) };
+    case 'bulleted-list':
+    case 'numbered-list':
+      return { ...body, indent: 16 };
+    case 'paragraph':
+    case 'page-break':
+    case 'section-break':
+      return body;
   }
 }
 
-function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const words = text.split(' ');
-  const lines: string[] = [];
-  let currentLine = '';
-
-  for (const word of words) {
-    const testLine = currentLine + (currentLine ? ' ' : '') + word;
-    const width = font.widthOfTextAtSize(testLine, size);
-
-    if (width > maxWidth && currentLine) {
-      lines.push(currentLine);
-      currentLine = word;
-    } else {
-      currentLine = testLine;
-    }
-  }
-
-  if (currentLine) lines.push(currentLine);
-  return lines.length > 0 ? lines : [''];
-}
-
-async function renderImageObject(
+function drawTextObject(
   page: PDFPage,
-  object: any, // ImageObject
-  project: DocumentProject,
+  object: Extract<DocumentObject, { kind: 'text' }>,
   x: number,
   y: number,
   w: number,
-  h: number
-): Promise<void> {
-  const asset = project.assets[object.assetId];
-  if (!asset) return;
+  h: number,
+  fonts: FontSet
+): void {
+  const style = textStyleFor(object, fonts);
+  const isList = object.role === 'bulleted-list' || object.role === 'numbered-list';
+  const availableWidth = w - style.indent - 8;
 
-  try {
-    // In real implementation, we'd load the blob and embed
-    // For now, draw placeholder
-    page.drawRectangle({
-      x,
-      y,
-      width: w,
-      height: h,
-      borderColor: rgb(0.8, 0.8, 0.8),
-      borderWidth: 1,
-    });
+  // Each list item gets its own marker. The previous implementation wrapped all
+  // items into one string and marked only the first line, so a multi-item list
+  // rendered as a single bullet.
+  const segments: { marker: string; text: string }[] = isList
+    ? (object.listItems ?? [object.content]).map((item, index) => ({
+        marker: object.role === 'bulleted-list' ? '•  ' : `${index + 1}.  `,
+        text: item,
+      }))
+    : [{ marker: '', text: object.content }];
 
-    page.drawText(`[Image: ${object.purpose}]`, {
-      x: x + 4,
-      y: y + h / 2,
-      size: 10,
-      color: rgb(0.5, 0.5, 0.5),
-    });
+  let cursorY = y + h - style.leading;
 
-    // Caption
-    if (object.altTextApproved) {
-      page.drawText(object.altTextApproved, {
-        x: x,
-        y: y - 16,
-        size: 9,
-        font: await page.doc.embedFont(StandardFonts.HelveticaOblique),
-        color: rgb(0.4, 0.4, 0.4),
-        maxWidth: w,
+  for (const segment of segments) {
+    const markerWidth =
+      segment.marker === '' ? 0 : style.font.widthOfTextAtSize(segment.marker, style.size);
+    const lines = wrapText(segment.text, style.font, style.size, availableWidth - markerWidth);
+
+    for (const [lineIndex, line] of lines.entries()) {
+      // Stop at the object's own lower edge; overflow was already reported as a
+      // layout diagnostic, so silently continuing would overlap neighbours.
+      if (cursorY < y) return;
+
+      const prefix = lineIndex === 0 ? segment.marker : ' '.repeat(segment.marker.length);
+      page.drawText(prefix + line, {
+        x: x + style.indent,
+        y: cursorY,
+        size: style.size,
+        font: style.font,
+        color: style.color,
       });
+      cursorY -= style.leading;
     }
-  } catch {
-    // Ignore image rendering errors
   }
 }
 
-async function renderChartObject(
+/**
+ * Greedy word wrap using the embedded font's real metrics.
+ *
+ * A single word wider than the line is emitted on its own line rather than
+ * dropped, so content is never silently lost.
+ */
+function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  if (text === '') return [];
+
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of text.split(/\s+/)) {
+    if (word === '') continue;
+    const candidate = current === '' ? word : `${current} ${word}`;
+
+    if (font.widthOfTextAtSize(candidate, size) > maxWidth && current !== '') {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current !== '') lines.push(current);
+  return lines;
+}
+
+// ============================================================================
+// Images
+// ============================================================================
+
+/**
+ * Draws an outlined box naming the image.
+ *
+ * Embedding pixels requires the asset blob, which lives in IndexedDB and is not
+ * reachable from this pure package. `apps/web` embeds real images before calling
+ * this renderer; until then a labelled box makes the omission visible in the PDF
+ * rather than leaving an unexplained gap.
+ */
+function drawImagePlaceholder(
   page: PDFPage,
-  object: any, // ChartObject
+  object: Extract<DocumentObject, { kind: 'image' }>,
   project: DocumentProject,
   x: number,
   y: number,
   w: number,
   h: number,
   fonts: FontSet
-): Promise<void> {
-  const chart = project.charts[object.chartId];
-  if (!chart) return;
+): void {
+  const asset = project.assets[object.assetId];
+  const label =
+    asset === undefined
+      ? `Missing image asset ${object.assetId}`
+      : `Image: ${object.altTextApproved ?? asset.fileName}`;
 
-  // Draw chart area
+  drawOutlinePlaceholder(page, label, x, y, w, h, fonts);
+}
+
+function drawOutlinePlaceholder(
+  page: PDFPage,
+  label: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fonts: FontSet
+): void {
   page.drawRectangle({
     x,
     y,
     width: w,
     height: h,
-    borderColor: rgb(0.9, 0.9, 0.9),
-    borderWidth: 0.5,
+    borderColor: rgb(0.7, 0.7, 0.7),
+    borderWidth: 0.75,
   });
 
-  // Title
+  const lines = wrapText(label, fonts.regular, 9, w - 8);
+  let cursorY = y + h / 2 + (lines.length - 1) * 6;
+  for (const line of lines.slice(0, 3)) {
+    page.drawText(line, {
+      x: x + 4,
+      y: cursorY,
+      size: 9,
+      font: fonts.regular,
+      color: rgb(0.35, 0.35, 0.35),
+    });
+    cursorY -= 12;
+  }
+}
+
+// ============================================================================
+// Charts
+// ============================================================================
+
+function drawChartObject(
+  page: PDFPage,
+  object: Extract<DocumentObject, { kind: 'chart' }>,
+  project: DocumentProject,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fonts: FontSet
+): void {
+  const chart = project.charts[object.chartId];
+  if (chart === undefined) {
+    drawOutlinePlaceholder(page, `Missing chart ${object.chartId}`, x, y, w, h, fonts);
+    return;
+  }
+
   page.drawText(chart.spec.title, {
     x: x + 8,
-    y: y + h - 20,
+    y: y + h - 16,
     size: 12,
-    font: fonts.boldFont,
+    font: fonts.bold,
     color: rgb(0.1, 0.1, 0.1),
     maxWidth: w - 16,
   });
 
-  // Render simple bar/line chart
-  if (chart.geometry) {
-    const chartX = x + 60;
-    const chartY = y + 30;
-    const chartW = w - 100;
-    const chartH = h - 80;
-
-    if (chart.spec.type === 'horizontal_bar' || chart.spec.type === 'vertical_bar') {
-      renderBarChart(page, chart, chartX, chartY, chartW, chartH);
-    } else if (chart.spec.type === 'line') {
-      renderLineChart(page, chart, chartX, chartY, chartW, chartH);
-    }
+  const geometry = chart.geometry;
+  if (geometry !== undefined) {
+    // Geometry is reprojected, not recomputed: it is the geometry the integrity
+    // checks verified against the data, so recomputing here could disagree with
+    // what was approved.
+    const plot = { x: x + 48, y: y + 28, w: w - 64, h: h - 60 };
+    drawChartGeometry(page, chart, plot);
   }
 
-  // Source note
-  if (chart.spec.sourceNote) {
+  if (chart.spec.sourceNote !== undefined && chart.spec.sourceNote !== '') {
     page.drawText(chart.spec.sourceNote, {
       x: x + 8,
       y: y + 8,
       size: 7,
-      font: fonts.obliqueFont,
-      color: rgb(0.5, 0.5, 0.5),
+      font: fonts.oblique,
+      color: rgb(0.35, 0.35, 0.35),
       maxWidth: w - 16,
     });
   }
 }
 
-function renderBarChart(
+/** Reprojects stored geometry into the given PDF plot rectangle. */
+function drawChartGeometry(
   page: PDFPage,
-  chart: any,
-  x: number,
-  y: number,
-  w: number,
-  h: number
+  chart: Chart,
+  plot: { x: number; y: number; w: number; h: number }
 ): void {
-  const { geometry, spec } = chart;
-  if (!geometry || !geometry.bars.length) return;
+  const geometry = chart.geometry;
+  if (geometry === undefined) return;
 
-  const maxValue = Math.max(...geometry.bars.map((b: any) => b.value));
-  const barCount = geometry.bars.length;
-  const barWidth = (w / barCount) * 0.8;
-  const gap = w / barCount - barWidth;
+  const source = geometryExtent(chart);
+  if (source.w <= 0 || source.h <= 0) return;
 
-  for (let i = 0; i < geometry.bars.length; i++) {
-    const bar = geometry.bars[i];
-    const series = spec.series[bar.seriesIndex];
-    const barHeight = (bar.value / maxValue) * h;
-    const barX = x + i * (barWidth + gap) + gap / 2;
-    const barY = y + h - barHeight;
+  const scaleX = plot.w / source.w;
+  const scaleY = plot.h / source.h;
 
-    // Convert hex color to RGB
-    const color = hexToRgb(series.color);
+  // Geometry uses top-left origin; flip within the plot rectangle.
+  const mapX = (gx: number) => plot.x + (gx - source.x) * scaleX;
+  const mapY = (gy: number) => plot.y + plot.h - (gy - source.y) * scaleY;
 
+  for (const bar of geometry.bars) {
+    const series = chart.spec.series[bar.seriesIndex];
     page.drawRectangle({
-      x: barX,
-      y: barY,
-      width: barWidth,
-      height: barHeight,
-      color: color,
+      x: mapX(bar.x),
+      y: mapY(bar.y + bar.h),
+      width: Math.max(0.5, bar.w * scaleX),
+      height: Math.max(0.5, bar.h * scaleY),
+      color: hexToRgb(series?.color ?? '#333333'),
     });
   }
 
-  // Y axis
-  page.drawLine({
-    start: { x, y },
-    end: { x, y: y + h },
-    thickness: 1,
-    color: rgb(0.5, 0.5, 0.5),
-  });
+  for (const line of geometry.lines) {
+    const series = chart.spec.series[line.seriesIndex];
+    const color = hexToRgb(series?.color ?? '#333333');
 
-  // X axis
-  page.drawLine({
-    start: { x, y: y + h },
-    end: { x: x + w, y: y + h },
-    thickness: 1,
-    color: rgb(0.5, 0.5, 0.5),
-  });
-}
+    for (let i = 1; i < line.points.length; i++) {
+      const from = line.points[i - 1];
+      const to = line.points[i];
+      if (from === undefined || to === undefined) continue;
 
-function renderLineChart(
-  page: PDFPage,
-  chart: any,
-  x: number,
-  y: number,
-  w: number,
-  h: number
-): void {
-  const { geometry, spec } = chart;
-  if (!geometry || !geometry.lines.length) return;
-
-  for (let i = 0; i < geometry.lines.length; i++) {
-    const line = geometry.lines[i];
-    const series = spec.series[i];
-    const color = hexToRgb(series.color);
-
-    if (!line.points.length) continue;
-
-    const points = line.points.map((p: any) => ({
-      x: x + (p.x / w) * w,
-      y: y + h - (p.y / h) * h,
-    }));
-
-    for (let j = 1; j < points.length; j++) {
       page.drawLine({
-        start: points[j - 1],
-        end: points[j],
-        thickness: 2,
+        start: { x: mapX(from.x), y: mapY(from.y) },
+        end: { x: mapX(to.x), y: mapY(to.y) },
+        thickness: 1.5,
         color,
       });
     }
   }
+
+  page.drawLine({
+    start: { x: plot.x, y: plot.y },
+    end: { x: plot.x, y: plot.y + plot.h },
+    thickness: 0.75,
+    color: rgb(0.45, 0.45, 0.45),
+  });
+  page.drawLine({
+    start: { x: plot.x, y: plot.y },
+    end: { x: plot.x + plot.w, y: plot.y },
+    thickness: 0.75,
+    color: rgb(0.45, 0.45, 0.45),
+  });
 }
 
-async function renderDiagramObject(
+/** Bounding box of a chart's stored geometry, in geometry units. */
+function geometryExtent(chart: Chart): { x: number; y: number; w: number; h: number } {
+  const geometry = chart.geometry;
+  if (geometry === undefined) return { x: 0, y: 0, w: 0, h: 0 };
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  const include = (x: number, y: number): void => {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+
+  for (const bar of geometry.bars) {
+    include(bar.x, bar.y);
+    include(bar.x + bar.w, bar.y + bar.h);
+  }
+  for (const line of geometry.lines) {
+    for (const point of line.points) include(point.x, point.y);
+  }
+  include(geometry.axes.x.x, geometry.axes.x.y);
+  include(geometry.axes.x.x + geometry.axes.x.w, geometry.axes.x.y);
+  include(geometry.axes.y.x, geometry.axes.y.y);
+  include(geometry.axes.y.x, geometry.axes.y.y + geometry.axes.y.h);
+
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, w: 0, h: 0 };
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+// ============================================================================
+// Diagrams
+// ============================================================================
+
+function drawDiagramObject(
   page: PDFPage,
-  object: any, // DiagramObject
+  object: Extract<DocumentObject, { kind: 'diagram' }>,
   project: DocumentProject,
   x: number,
   y: number,
   w: number,
   h: number,
   fonts: FontSet
-): Promise<void> {
+): void {
   const diagram = project.diagrams[object.diagramId];
-  if (!diagram) return;
+  if (diagram === undefined) {
+    drawOutlinePlaceholder(page, `Missing diagram ${object.diagramId}`, x, y, w, h, fonts);
+    return;
+  }
+  if (diagram.nodes.length === 0) {
+    drawOutlinePlaceholder(page, 'Diagram has no nodes', x, y, w, h, fonts);
+    return;
+  }
 
-  // Draw diagram area
-  page.drawRectangle({
-    x,
-    y,
-    width: w,
-    height: h,
-    borderColor: rgb(0.9, 0.9, 0.9),
-    borderWidth: 0.5,
-  });
-
-  // Render nodes and edges
-  const bounds = getDiagramBounds(diagram);
-  const scaleX = (w - 40) / bounds.w;
-  const scaleY = (h - 40) / bounds.h;
-  const scale = Math.min(scaleX, scaleY);
+  const bounds = diagramExtent(diagram);
+  const padding = 20;
+  // Uniform scale preserves the layout's proportions; independent axis scales
+  // would distort node shapes and invalidate the approved geometry.
+  const scale = Math.min((w - 2 * padding) / bounds.w, (h - 2 * padding) / bounds.h);
   const offsetX = x + (w - bounds.w * scale) / 2;
   const offsetY = y + (h - bounds.h * scale) / 2;
 
-  // Edges first
-  for (const edge of diagram.edges) {
-    const from = diagram.nodes.find((n: any) => n.id === edge.from);
-    const to = diagram.nodes.find((n: any) => n.id === edge.to);
-    if (!from || !to) continue;
+  const mapX = (gx: number) => offsetX + (gx - bounds.x) * scale;
+  const mapY = (gy: number) => offsetY + (bounds.h - (gy - bounds.y)) * scale;
 
-    const fromX = offsetX + (from.bounds.x + from.bounds.w / 2) * scale;
-    const fromY = offsetY + (from.bounds.y + from.bounds.h / 2) * scale;
-    const toX = offsetX + (to.bounds.x + to.bounds.w / 2) * scale;
-    const toY = offsetY + (to.bounds.y + to.bounds.h / 2) * scale;
+  const nodesById = new Map(diagram.nodes.map((n) => [n.id, n]));
+
+  for (const edge of diagram.edges) {
+    const from = nodesById.get(edge.from);
+    const to = nodesById.get(edge.to);
+    if (from === undefined || to === undefined) continue;
 
     page.drawLine({
-      start: { x: fromX, y: fromY },
-      end: { x: toX, y: toY },
+      start: {
+        x: mapX(from.bounds.x + from.bounds.w / 2),
+        y: mapY(from.bounds.y + from.bounds.h / 2),
+      },
+      end: { x: mapX(to.bounds.x + to.bounds.w / 2), y: mapY(to.bounds.y + to.bounds.h / 2) },
       thickness: 1,
       color: rgb(0.3, 0.3, 0.3),
     });
   }
 
-  // Nodes
+  const labelSize = Math.max(6, 9 * scale);
   for (const node of diagram.nodes) {
-    const nx = offsetX + node.bounds.x * scale;
-    const ny = offsetY + node.bounds.y * scale;
     const nw = node.bounds.w * scale;
     const nh = node.bounds.h * scale;
+    const nx = mapX(node.bounds.x);
+    const ny = mapY(node.bounds.y + node.bounds.h);
 
     page.drawRectangle({
       x: nx,
@@ -550,128 +551,161 @@ async function renderDiagramObject(
       borderWidth: 1,
     });
 
+    // Horizontally centred using measured width; `maxWidth` alone does not centre.
+    const labelWidth = fonts.regular.widthOfTextAtSize(node.label, labelSize);
     page.drawText(node.label, {
-      x: nx + nw / 2,
-      y: ny + nh / 2 + 3,
-      size: Math.max(6, 9 * scale),
-      font: fonts.regularFont,
+      x: nx + Math.max(2, (nw - labelWidth) / 2),
+      y: ny + nh / 2 - labelSize / 3,
+      size: labelSize,
+      font: fonts.regular,
       color: rgb(0.1, 0.1, 0.1),
-      maxWidth: nw - 4,
+      maxWidth: Math.max(4, nw - 4),
     });
   }
 }
 
-async function renderTableObject(
-  page: PDFPage,
-  object: any, // TableObject
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  fonts: FontSet
-): Promise<void> {
-  const { headers, rows } = object;
+function diagramExtent(diagram: Diagram): { x: number; y: number; w: number; h: number } {
+  if (diagram.nodes.length === 0) return { x: 0, y: 0, w: 400, h: 300 };
 
-  const colWidth = w / headers.length;
-  const rowHeight = 20;
-  const headerHeight = 24;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
 
-  // Header
-  page.drawRectangle({
-    x,
-    y: y + h - headerHeight,
-    width: w,
-    height: headerHeight,
-    color: rgb(0.95, 0.95, 0.95),
-    borderColor: rgb(0.8, 0.8, 0.8),
-    borderWidth: 1,
-  });
-
-  for (let i = 0; i < headers.length; i++) {
-    page.drawText(headers[i], {
-      x: x + i * colWidth + 4,
-      y: y + h - headerHeight + 6,
-      size: 9,
-      font: fonts.boldFont,
-      color: rgb(0.1, 0.1, 0.1),
-      maxWidth: colWidth - 8,
-    });
-  }
-
-  // Rows
-  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
-    const row = rows[rowIdx];
-    const rowY = y + h - headerHeight - (rowIdx + 1) * rowHeight;
-
-    if (rowY < y) break;
-
-    if (rowIdx % 2 === 0) {
-      page.drawRectangle({
-        x,
-        y: rowY,
-        width: w,
-        height: rowHeight,
-        color: rgb(0.98, 0.98, 0.98),
-      });
-    }
-
-    for (let colIdx = 0; colIdx < headers.length; colIdx++) {
-      const cell = row[colIdx] ?? '';
-      page.drawText(String(cell), {
-        x: x + colIdx * colWidth + 4,
-        y: rowY + 6,
-        size: 8,
-        font: fonts.regularFont,
-        color: rgb(0.2, 0.2, 0.2),
-        maxWidth: colWidth - 8,
-      });
-    }
-
-    // Grid lines
-    for (let colIdx = 0; colIdx <= headers.length; colIdx++) {
-      page.drawLine({
-        start: { x: x + colIdx * colWidth, y: rowY },
-        end: { x: x + colIdx * colWidth, y: rowY + rowHeight },
-        thickness: 0.5,
-        color: rgb(0.8, 0.8, 0.8),
-      });
-    }
-  }
-}
-
-function addPageNumber(
-  page: PDFPage,
-  pageNum: number,
-  totalPages: number,
-  font: PDFFont
-): void {
-  page.drawText(`${pageNum} / ${totalPages}`, {
-    x: A4_WIDTH / 2,
-    y: 24,
-    size: 9,
-    font,
-    color: rgb(0.5, 0.5, 0.5),
-  });
-}
-
-function getDiagramBounds(diagram: any): Bounds {
-  if (!diagram.nodes.length) return { x: 0, y: 0, w: 400, h: 300 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const node of diagram.nodes) {
     minX = Math.min(minX, node.bounds.x);
     minY = Math.min(minY, node.bounds.y);
     maxX = Math.max(maxX, node.bounds.x + node.bounds.w);
     maxY = Math.max(maxY, node.bounds.y + node.bounds.h);
   }
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+
+  // Guard against a zero-extent single node, which would make `scale` infinite.
+  return {
+    x: minX,
+    y: minY,
+    w: Math.max(1, maxX - minX),
+    h: Math.max(1, maxY - minY),
+  };
 }
 
-function hexToRgb(hex: string): ReturnType<typeof pdfRgb> {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!result) return pdfRgb(0, 0, 0);
-  return pdfRgb(
-    parseInt(result[1], 16) / 255,
-    parseInt(result[2], 16) / 255,
-    parseInt(result[3], 16) / 255
+// ============================================================================
+// Tables
+// ============================================================================
+
+function drawTableObject(
+  page: PDFPage,
+  object: Extract<DocumentObject, { kind: 'table' }>,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fonts: FontSet
+): void {
+  if (object.headers.length === 0) return;
+
+  const colWidth = w / object.headers.length;
+  const headerHeight = 24;
+  const rowHeight = 20;
+
+  page.drawRectangle({
+    x,
+    y: y + h - headerHeight,
+    width: w,
+    height: headerHeight,
+    color: rgb(0.94, 0.94, 0.94),
+    borderColor: rgb(0.7, 0.7, 0.7),
+    borderWidth: 0.75,
+  });
+
+  for (const [index, header] of object.headers.entries()) {
+    page.drawText(header, {
+      x: x + index * colWidth + 4,
+      y: y + h - headerHeight + 8,
+      size: 9,
+      font: fonts.bold,
+      color: rgb(0.1, 0.1, 0.1),
+      maxWidth: colWidth - 8,
+    });
+  }
+
+  for (const [rowIndex, row] of object.rows.entries()) {
+    const rowY = y + h - headerHeight - (rowIndex + 1) * rowHeight;
+    if (rowY < y) break;
+
+    // Zebra striping starts on the first data row.
+    if (rowIndex % 2 === 1) {
+      page.drawRectangle({
+        x,
+        y: rowY,
+        width: w,
+        height: rowHeight,
+        color: rgb(0.975, 0.975, 0.975),
+      });
+    }
+
+    for (let colIndex = 0; colIndex < object.headers.length; colIndex++) {
+      page.drawText(row[colIndex] ?? '', {
+        x: x + colIndex * colWidth + 4,
+        y: rowY + 6,
+        size: 8,
+        font: fonts.regular,
+        color: rgb(0.15, 0.15, 0.15),
+        maxWidth: colWidth - 8,
+      });
+    }
+
+    page.drawLine({
+      start: { x, y: rowY },
+      end: { x: x + w, y: rowY },
+      thickness: 0.5,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+  }
+
+  for (let colIndex = 0; colIndex <= object.headers.length; colIndex++) {
+    const lineX = x + colIndex * colWidth;
+    page.drawLine({
+      start: { x: lineX, y: Math.max(y, y + h - headerHeight - object.rows.length * rowHeight) },
+      end: { x: lineX, y: y + h },
+      thickness: 0.5,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+  }
+}
+
+// ============================================================================
+// Page furniture
+// ============================================================================
+
+function drawPageNumber(
+  page: PDFPage,
+  pageNumber: number,
+  totalPages: number,
+  font: PDFFont
+): void {
+  const label = `${pageNumber} of ${totalPages}`;
+  const size = 9;
+  const width = font.widthOfTextAtSize(label, size);
+
+  page.drawText(label, {
+    // Centred using measured width; `x: PAGE_WIDTH / 2` left it visibly off-centre.
+    x: (PAGE_WIDTH - width) / 2,
+    y: FOOTER_BAND / 2,
+    size,
+    font,
+    color: rgb(0.35, 0.35, 0.35),
+  });
+}
+
+/** Parses `#rrggbb` (with or without `#`) into a pdf-lib colour. Black on failure. */
+function hexToRgb(hex: string): ReturnType<typeof rgb> {
+  const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (match === null) return rgb(0, 0, 0);
+
+  const [, r, g, b] = match;
+  return rgb(
+    Number.parseInt(r ?? '00', 16) / 255,
+    Number.parseInt(g ?? '00', 16) / 255,
+    Number.parseInt(b ?? '00', 16) / 255
   );
 }

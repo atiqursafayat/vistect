@@ -1,8 +1,17 @@
 // ============================================================================
 // Chart Data Table Generation
 // ============================================================================
+//
+// The accessible data table is the primary representation of a chart for screen
+// reader users (AC F-4.x §2: table precedes chart in DOM order). It is generated
+// from the same `Dataset` the renderer draws from, so the table and the picture
+// cannot disagree.
 
-import type { Dataset, DataColumn, ChartSpec } from '../index';
+import type { DataColumn, Dataset, ChartSpec } from '@vistect/domain/schema';
+import { escapeHtml } from '@vistect/domain/text';
+
+/** A scalar as stored in a dataset column. */
+export type CellValue = DataColumn['values'][number];
 
 export interface TableColumn {
   name: string;
@@ -13,15 +22,13 @@ export interface TableColumn {
 export interface AccessibleTable {
   caption: string;
   headers: TableColumn[];
-  rows: Array<Record<string, any>>;
+  rows: Record<string, CellValue | undefined>[];
   summary: string;
 }
 
 export function generateChartTable(dataset: Dataset, spec: ChartSpec): AccessibleTable {
-  const categoryCol = dataset.columns.find(c => c.type === 'string' || c.type === 'date');
-  const numericCols = dataset.columns.filter(c => c.type === 'number');
+  const categoryCol = dataset.columns.find((c) => c.type === 'string' || c.type === 'date');
 
-  // Build headers
   const headers: TableColumn[] = [];
 
   if (categoryCol) {
@@ -33,7 +40,7 @@ export function generateChartTable(dataset: Dataset, spec: ChartSpec): Accessibl
   }
 
   for (const series of spec.series) {
-    const col = dataset.columns.find(c => c.id === series.dataColumnId);
+    const col = dataset.columns.find((c) => c.id === series.dataColumnId);
     if (col) {
       headers.push({
         name: series.name,
@@ -43,81 +50,97 @@ export function generateChartTable(dataset: Dataset, spec: ChartSpec): Accessibl
     }
   }
 
-  // Build rows
-  const rowCount = dataset.rowCount;
-  const rows: Array<Record<string, any>> = [];
-
-  for (let i = 0; i < rowCount; i++) {
-    const row: Record<string, any> = {};
+  // Rows are built from each header's own `values` array rather than by
+  // re-looking-up columns by name: a series may be renamed (`series.name`
+  // differs from `col.name`), and duplicate names would otherwise collide.
+  const rows: Record<string, CellValue | undefined>[] = [];
+  for (let i = 0; i < dataset.rowCount; i++) {
+    const row: Record<string, CellValue | undefined> = {};
     for (const header of headers) {
-      const col = dataset.columns.find(c => c.name === header.name);
-      if (col) {
-        row[header.name] = col.values[i];
-      }
+      row[header.name] = header.values[i];
     }
     rows.push(row);
   }
 
-  // Generate summary
-  let summary = `${spec.title}. `;
+  const summaryParts = [`${spec.title}.`];
   if (categoryCol) {
-    summary += `Categories: ${[...new Set(categoryCol.values)].join(', ')}. `;
+    summaryParts.push(`Categories: ${[...new Set(categoryCol.values.map(String))].join(', ')}.`);
   }
-  summary += `Series: ${spec.series.map(s => s.name).join(', ')}. `;
-  summary += `${rowCount} data points.`;
+  summaryParts.push(`Series: ${spec.series.map((s) => s.name).join(', ')}.`);
+  summaryParts.push(`${dataset.rowCount} data points.`);
 
   return {
     caption: `${spec.title} - Data Table`,
     headers,
     rows,
-    summary,
+    summary: summaryParts.join(' '),
   };
 }
 
+/**
+ * Renders the table as semantic HTML.
+ *
+ * Every interpolated value is escaped: dataset content is untrusted (it may come
+ * from an imported CSV or an agent-supplied table).
+ */
 export function generateTableHTML(table: AccessibleTable): string {
-  let html = `<table class="chart-data-table" role="table">`;
-  html += `<caption>${escapeHtml(table.caption)}</caption>`;
-  html += `<thead><tr>`;
+  const parts: string[] = ['<table class="chart-data-table">'];
+  parts.push(`<caption>${escapeHtml(table.caption)}</caption>`);
+
+  parts.push('<thead><tr>');
   for (const header of table.headers) {
-    html += `<th scope="col">${escapeHtml(header.name)}</th>`;
+    parts.push(`<th scope="col">${escapeHtml(header.name)}</th>`);
   }
-  html += `</tr></thead>`;
-  html += `<tbody>`;
+  parts.push('</tr></thead>');
+
+  parts.push('<tbody>');
   for (const row of table.rows) {
-    html += `<tr>`;
-    for (const header of table.headers) {
-      const value = row[header.name];
-      const formatted = formatValue(value, header.type);
-      html += `<td>${escapeHtml(formatted)}</td>`;
+    parts.push('<tr>');
+    for (const [index, header] of table.headers.entries()) {
+      const formatted = formatValue(row[header.name], header.type);
+      // First column acts as the row header so screen readers can announce
+      // "<category>, <series>: <value>" when navigating cells.
+      parts.push(
+        index === 0
+          ? `<th scope="row">${escapeHtml(formatted)}</th>`
+          : `<td>${escapeHtml(formatted)}</td>`
+      );
     }
-    html += `</tr>`;
+    parts.push('</tr>');
   }
-  html += `</tbody></table>`;
-  return html;
+  parts.push('</tbody></table>');
+
+  return parts.join('');
 }
 
+/** Renders the table as GitHub-flavoured Markdown, escaping cell delimiters. */
 export function generateTableMarkdown(table: AccessibleTable): string {
-  let md = `| ${table.headers.map(h => h.name).join(' | ')} |\n`;
-  md += `| ${table.headers.map(() => '---').join(' | ')} |\n`;
+  const escapeCell = (value: string) => value.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+
+  const lines = [
+    `| ${table.headers.map((h) => escapeCell(h.name)).join(' | ')} |`,
+    `| ${table.headers.map(() => '---').join(' | ')} |`,
+  ];
+
   for (const row of table.rows) {
-    md += `| ${table.headers.map(h => String(row[h.name] ?? '')).join(' | ')} |\n`;
+    const cells = table.headers.map((h) => escapeCell(formatValue(row[h.name], h.type)));
+    lines.push(`| ${cells.join(' | ')} |`);
   }
-  return md;
+
+  return `${lines.join('\n')}\n`;
 }
 
-function formatValue(value: any, type: DataColumn['type']): string {
+function formatValue(value: CellValue | undefined, type: DataColumn['type']): string {
   if (value === null || value === undefined) return '';
-  if (type === 'number') return Number(value).toLocaleString();
-  if (type === 'date') return value instanceof Date ? value.toISOString().split('T')[0] : String(value);
-  if (type === 'boolean') return value ? 'Yes' : 'No';
-  return String(value);
-}
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, ''');
+  switch (type) {
+    case 'number':
+      return Number(value).toLocaleString('en-US');
+    case 'date':
+      return value instanceof Date ? (value.toISOString().split('T')[0] ?? '') : String(value);
+    case 'boolean':
+      return value ? 'Yes' : 'No';
+    case 'string':
+      return String(value);
+  }
 }

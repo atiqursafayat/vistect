@@ -1,189 +1,107 @@
 // ============================================================================
-// HTML Renderer - Semantic HTML Preview + Export Bundle
+// HTML Renderer - Semantic HTML Preview and Export Bundle
 // ============================================================================
+//
+// One renderer serves both the in-app preview and the exported HTML companion,
+// so what an author inspects is what ships (AC F-1.10 §1).
+//
+// Two rules govern this module:
+//
+//   1. Semantics come from the object model. A heading is an `<h1>`–`<h4>` because
+//      `role === 'heading'`, not because of its size. Reading order is DOM order.
+//   2. Every interpolated value is escaped. Document content is untrusted: it may
+//      have been imported from a PDF or supplied by an agent.
 
 import type {
-  DocumentProject,
-  DocumentObject,
-  Page,
-  PageTemplate,
-  ImageAsset,
-  Diagram,
   Chart,
   Dataset,
-  Bounds,
-  AccessibilityMetadata,
-  ApprovalState,
+  Diagram,
+  DocumentObject,
+  DocumentProject,
 } from '@vistect/domain/schema';
+import { escapeXml } from '@vistect/domain/text';
 
-// ============================================================================
-// Layout Engine Types
-// ============================================================================
+import { HTMLBuilder } from './builder';
+import { generateGlobalStyles, resolveLayout, type ResolvedLayout, type ResolvedObject } from './layout';
 
-export interface ResolvedLayout {
-  pages: ResolvedPage[];
-  globalStyles: string;
+export * from './layout';
+export { HTMLBuilder, type Attributes, type AttributeValue } from './builder';
+
+/** Heading level → tag name. Levels are clamped to the h1–h4 range the spec allows. */
+function headingTag(level: number): 'h1' | 'h2' | 'h3' | 'h4' {
+  const clamped = Math.min(4, Math.max(1, Math.trunc(level)));
+  return (['h1', 'h2', 'h3', 'h4'] as const)[clamped - 1] ?? 'h1';
 }
 
-export interface ResolvedPage {
-  pageId: string;
-  template: PageTemplate;
-  objects: ResolvedObject[];
-  bounds: Bounds;
+/** Absolute positioning derived from resolved geometry, never from authored input. */
+function positionStyle(resolved: ResolvedObject): string {
+  const { x, y, w, h } = resolved.resolvedBounds;
+  return `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;z-index:${resolved.zIndex};`;
 }
-
-export interface ResolvedObject {
-  object: DocumentObject;
-  resolvedBounds: Bounds;
-  zIndex: number;
-}
-
-// ============================================================================
-// Layout Engine
-// ============================================================================
-
-export function resolveLayout(project: DocumentProject): ResolvedLayout {
-  const pages: ResolvedPage[] = [];
-
-  for (const pageId of project.pageOrder) {
-    const page = project.pages[pageId];
-    if (!page) continue;
-
-    const resolvedObjects: ResolvedObject[] = [];
-    const pageBounds = getTemplateBounds(page.template);
-
-    // Sort objects by layer then reading order
-    const sortedObjects = page.objects
-      .map(id => project.objects[id])
-      .filter(Boolean) as DocumentObject[];
-
-    sortedObjects.sort((a, b) => {
-      if (a.layer !== b.layer) return a.layer - b.layer;
-      return a.readingOrderIndex - b.readingOrderIndex;
-    });
-
-    for (let i = 0; i < sortedObjects.length; i++) {
-      const obj = sortedObjects[i];
-      const resolvedBounds = resolveObjectBounds(obj, pageBounds, page, project, i);
-
-      resolvedObjects.push({
-        object: obj,
-        resolvedBounds,
-        zIndex: obj.layer * 1000 + i,
-      });
-    }
-
-    pages.push({
-      pageId,
-      template: page.template,
-      objects: resolvedObjects,
-      bounds: pageBounds,
-    });
-  }
-
-  return {
-    pages,
-    globalStyles: generateGlobalStyles(project),
-  };
-}
-
-function getTemplateBounds(template: PageTemplate): Bounds {
-  // A4 at 72 DPI with margins
-  return { x: 0, y: 0, w: 595, h: 842 };
-}
-
-function resolveObjectBounds(
-  obj: DocumentObject,
-  pageBounds: Bounds,
-  page: Page,
-  project: DocumentProject,
-  index: number
-): Bounds {
-  // If object has explicit bounds, use them (from layout engine)
-  // Otherwise compute from constraints
-  if (obj.bounds.w > 0 && obj.bounds.h > 0) {
-    return { ...obj.bounds };
-  }
-
-  // Default positioning based on template regions
-  return computeDefaultPosition(obj, pageBounds, index);
-}
-
-function computeDefaultPosition(obj: DocumentObject, pageBounds: Bounds, index: number): Bounds {
-  const margin = 72; // 1 inch
-  const contentWidth = pageBounds.w - 2 * margin;
-  const lineHeight = 24;
-  const estimatedHeight = Math.max(lineHeight, obj.kind === 'text' ? estimateTextHeight(obj) : 200);
-
-  return {
-    x: margin,
-    y: margin + index * (estimatedHeight + 16),
-    w: contentWidth,
-    h: estimatedHeight,
-  };
-}
-
-function estimateTextHeight(obj: DocumentObject): number {
-  if (obj.kind !== 'text') return 100;
-  const charsPerLine = Math.max(1, Math.floor((595 - 144) / 8));
-  const lines = Math.ceil(obj.content.length / charsPerLine);
-  return lines * 24 + 16;
-}
-
-// ============================================================================
-// HTML Generation
-// ============================================================================
 
 export function renderProjectHTML(project: DocumentProject, layout: ResolvedLayout): string {
   const html = new HTMLBuilder();
 
+  html.unsafeRaw('<!DOCTYPE html>');
   html.open('html', { lang: project.language });
+
   html.open('head');
-  html.tag('meta', { charset: 'utf-8' });
-  html.tag('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' });
+  html.voidTag('meta', { charset: 'utf-8' });
+  html.voidTag('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' });
   html.tag('title', {}, project.title);
   html.open('style');
-  html.raw(layout.globalStyles);
-  html.raw(generatePageStyles(layout));
+  html.unsafeRaw(layout.globalStyles);
   html.close('style');
   html.close('head');
 
   html.open('body');
-  html.open('main', { id: 'document', role: 'document' });
 
-  // Skip link
-  html.tag('a', { href: '#navigator', class: 'skip-link' }, 'Skip to navigator');
-  html.tag('a', { href: '#explorer', class: 'skip-link' }, 'Skip to object explorer');
-  html.tag('a', { href: '#decisions', class: 'skip-link' }, 'Skip to decisions');
+  // Skip links precede everything, so a keyboard user reaches landmarks in one tab.
+  html.tag('a', { href: '#document-content', class: 'skip-link' }, 'Skip to document content');
 
-  // Live regions for announcements
-  html.open('div', { id: 'live-polite', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', class: 'sr-only' });
+  // Live regions for announcements (§21.3). Empty in the exported bundle; the app
+  // writes into them at runtime.
+  html.open('div', {
+    id: 'live-polite',
+    role: 'status',
+    'aria-live': 'polite',
+    'aria-atomic': 'true',
+    class: 'sr-only',
+  });
   html.close('div');
-  html.open('div', { id: 'live-assertive', role: 'alert', 'aria-live': 'assertive', 'aria-atomic': 'true', class: 'sr-only' });
+  html.open('div', {
+    id: 'live-assertive',
+    role: 'alert',
+    'aria-live': 'assertive',
+    'aria-atomic': 'true',
+    class: 'sr-only',
+  });
   html.close('div');
 
-  // Pages
-  for (const page of layout.pages) {
+  html.open('main', { id: 'document-content' });
+  html.tag('h1', { class: 'sr-only' }, project.title);
+
+  for (const [index, page] of layout.pages.entries()) {
     html.open('section', {
       id: `page-${page.pageId}`,
-      role: 'region',
-      'aria-label': `Page ${layout.pages.indexOf(page) + 1}`,
+      'aria-label': `Page ${index + 1} of ${layout.pages.length}`,
       class: 'page',
       'data-template': page.template,
     });
 
-    // Page template regions
-    const regions = getTemplateRegions(page.template);
-    for (const region of regions) {
-      html.open('div', { class: `region region-${region.name}`, 'data-region': region.name });
-      const regionObjects = page.objects.filter(o =>
-        o.resolvedBounds.x >= region.bounds.x &&
-        o.resolvedBounds.y >= region.bounds.y &&
-        o.resolvedBounds.x + o.resolvedBounds.w <= region.bounds.x + region.bounds.w &&
-        o.resolvedBounds.y + o.resolvedBounds.h <= region.bounds.y + region.bounds.h
-      );
-      for (const robj of regionObjects) {
-        html.raw(renderObject(robj, project));
+    // Objects are grouped by their resolved region, which is authoritative.
+    // Grouping by coordinate containment (the previous approach) dropped any
+    // object whose box crossed a region edge — it appeared in no region at all.
+    for (const region of page.regions) {
+      const inRegion = page.objects.filter((o) => o.regionName === region.name);
+      if (inRegion.length === 0) continue;
+
+      html.open('div', {
+        class: `region region-${region.name}`,
+        'data-region': region.name,
+      });
+      for (const resolved of inRegion) {
+        html.unsafeRaw(renderObject(resolved, project));
       }
       html.close('div');
     }
@@ -198,694 +116,600 @@ export function renderProjectHTML(project: DocumentProject, layout: ResolvedLayo
   return html.toString();
 }
 
-function renderObject(robj: ResolvedObject, project: DocumentProject): string {
-  const { object, resolvedBounds } = robj;
-  const style = `position:absolute;left:${resolvedBounds.x}px;top:${resolvedBounds.y}px;width:${resolvedBounds.w}px;height:${resolvedBounds.h}px;z-index:${robj.zIndex};`;
-
-  const html = new HTMLBuilder();
-  const accessibility = object.accessibility;
-
-  // Determine element type and ARIA
-  let tag = 'div';
-  let role = accessibility.role;
-  let ariaLabel = accessibility.altText || accessibility.accessibleName || object.purpose;
-  let ariaDescribedBy = accessibility.longDescription ? `${object.id}-desc` : undefined;
+function renderObject(resolved: ResolvedObject, project: DocumentProject): string {
+  const { object } = resolved;
+  const style = positionStyle(resolved);
 
   switch (object.kind) {
     case 'text':
-      return renderTextObject(object, style, html);
+      return renderTextObject(object, style);
     case 'image':
-      return renderImageObject(object, project, style, html);
+      return renderImageObject(object, project, style);
     case 'icon':
-      return renderIconObject(object, style, html);
+      return renderIconObject(object, style);
     case 'chart':
-      return renderChartObject(object, project, style, html);
+      return renderChartObject(object, project, style);
     case 'diagram':
-      return renderDiagramObject(object, project, style, html);
+      return renderDiagramObject(object, project, style);
     case 'table':
-      return renderTableObject(object, style, html);
+      return renderTableObject(object, style);
     case 'shape':
-      return renderShapeObject(object, style, html);
+      return renderShapeObject(object, style);
   }
-
-  // Generic fallback
-  html.open(tag, { id: object.id, class: `object object-${object.kind}`, style, role, 'aria-label': ariaLabel, 'aria-describedby': ariaDescribedBy });
-  html.close(tag);
-
-  if (accessibility.longDescription) {
-    html.open('div', { id: `${object.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('div');
-  }
-
-  return html.toString();
 }
 
-function renderTextObject(obj: DocumentObject, style: string, html: HTMLBuilder): string {
-  const role = obj.role;
-  const accessibility = obj.accessibility;
+/** Long description in a visually hidden element, referenced by `aria-describedby`. */
+function appendLongDescription(html: HTMLBuilder, object: DocumentObject): void {
+  const description = object.accessibility.longDescription;
+  if (description === undefined || description.trim() === '') return;
 
-  let tag = 'div';
-  let level = 0;
+  html.open('div', { id: `${object.id}-desc`, class: 'sr-only' });
+  html.text(description);
+  html.close('div');
+}
 
-  switch (role) {
-    case 'heading':
-      level = obj.headingLevel || 1;
-      tag = `h${level}`;
-      break;
-    case 'paragraph':
-      tag = 'p';
-      break;
-    case 'bulleted-list':
-      tag = 'ul';
-      break;
-    case 'numbered-list':
-      tag = 'ol';
-      break;
-    case 'quotation':
-      tag = 'blockquote';
-      break;
-    case 'callout':
-      tag = 'aside';
-      break;
-    case 'statistic-card':
-      tag = 'div';
-      break;
-    case 'caption':
-      tag = 'figcaption';
-      break;
-    case 'footnote':
-      tag = 'footer';
-      break;
-    case 'source-note':
-      tag = 'small';
-      break;
-    case 'hyperlink':
-      tag = 'a';
-      break;
-  }
+function describedBy(object: DocumentObject): string | undefined {
+  const description = object.accessibility.longDescription;
+  return description === undefined || description.trim() === '' ? undefined : `${object.id}-desc`;
+}
 
-  const attrs: Record<string, string> = {
-    id: obj.id,
+function renderTextObject(object: Extract<DocumentObject, { kind: 'text' }>, style: string): string {
+  const html = new HTMLBuilder();
+  const { accessibility, role } = object;
+
+  const attrs = {
+    id: object.id,
     class: `object object-text object-${role}`,
     style,
     'data-role': role,
+    // A decorative text object is hidden from assistive technology entirely;
+    // `role="presentation"` alone would still expose its contents.
+    ...(accessibility.isDecorative ? { 'aria-hidden': true } : {}),
+    ...(describedBy(object) === undefined ? {} : { 'aria-describedby': describedBy(object) }),
   };
 
-  if (role === 'heading') {
-    attrs['aria-level'] = String(level);
-  }
+  switch (role) {
+    case 'heading':
+      html.tag(headingTag(object.headingLevel ?? 1), attrs, object.content);
+      break;
 
-  if (accessibility.isDecorative) {
-    attrs.role = 'presentation';
-    attrs['aria-hidden'] = 'true';
-  } else if (accessibility.altText) {
-    attrs['aria-label'] = accessibility.altText;
-  }
-
-  if (role === 'hyperlink' && obj.hyperlink) {
-    attrs.href = obj.hyperlink;
-    attrs.target = '_blank';
-    attrs.rel = 'noopener noreferrer';
-  }
-
-  html.open(tag, attrs);
-
-  if (role === 'bulleted-list' || role === 'numbered-list') {
-    const items = obj.listItems || [obj.content];
-    for (const item of items) {
-      html.open('li', { class: 'list-item' });
-      html.raw(item);
-      html.close('li');
+    case 'bulleted-list':
+    case 'numbered-list': {
+      html.open(role === 'bulleted-list' ? 'ul' : 'ol', attrs);
+      const items = object.listItems ?? [object.content];
+      for (const item of items) {
+        html.tag('li', {}, item);
+      }
+      html.close(role === 'bulleted-list' ? 'ul' : 'ol');
+      break;
     }
-  } else if (role === 'quotation') {
-    html.open('p', { class: 'quote-text' });
-    html.raw(obj.content);
-    html.close('p');
-    if (obj.content) {
-      html.open('footer', { class: 'quote-attribution' });
-      html.raw(obj.content);
-      html.close('footer');
-    }
-  } else if (role === 'callout') {
-    html.open('div', { class: 'callout-content' });
-    html.raw(obj.content);
-    html.close('div');
-  } else if (role === 'statistic-card') {
-    html.open('div', { class: 'statistic-value' });
-    html.raw(obj.content);
-    html.close('div');
-  } else {
-    html.raw(obj.content);
+
+    case 'quotation':
+      html.open('blockquote', attrs);
+      html.tag('p', {}, object.content);
+      html.close('blockquote');
+      break;
+
+    case 'callout':
+      // `<aside>` conveys "related but tangential", which is what a callout is.
+      html.open('aside', attrs);
+      html.tag('p', {}, object.content);
+      html.close('aside');
+      break;
+
+    case 'statistic-card':
+      html.open('div', attrs);
+      html.tag('p', { class: 'statistic-value' }, object.content);
+      html.close('div');
+      break;
+
+    case 'caption':
+      html.tag('figcaption', attrs, object.content);
+      break;
+
+    case 'footnote':
+      html.tag('p', { ...attrs, class: `${attrs.class} object-footnote` }, object.content);
+      break;
+
+    case 'source-note':
+      html.tag('p', { ...attrs, class: `${attrs.class} object-source-note` }, object.content);
+      break;
+
+    case 'hyperlink':
+      // `rel` is mandatory alongside `target="_blank"`: without `noopener` the
+      // opened page can reach back through `window.opener`.
+      html.tag(
+        'a',
+        {
+          ...attrs,
+          href: object.hyperlink,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        },
+        object.content
+      );
+      break;
+
+    case 'page-break':
+    case 'section-break':
+      html.voidTag('hr', { ...attrs, 'aria-hidden': true });
+      break;
+
+    case 'paragraph':
+      html.tag('p', attrs, object.content);
+      break;
+
+    default:
+      html.tag('p', attrs, object.content);
   }
 
-  html.close(tag);
-
-  if (accessibility.longDescription) {
-    html.open('div', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('div');
-  }
-
+  appendLongDescription(html, object);
   return html.toString();
 }
 
-function renderImageObject(obj: DocumentObject, project: DocumentProject, style: string, html: HTMLBuilder): string {
-  const imageObj = obj as any; // ImageObject
-  const asset = project.assets[imageObj.assetId];
-  const accessibility = obj.accessibility;
+function renderImageObject(
+  object: Extract<DocumentObject, { kind: 'image' }>,
+  project: DocumentProject,
+  style: string
+): string {
+  const html = new HTMLBuilder();
+  const asset = project.assets[object.assetId];
 
-  const src = asset ? URL.createObjectURL(asset.blob) : '';
-  const alt = accessibility.isDecorative ? '' : (imageObj.altTextApproved || accessibility.altText || obj.purpose);
+  html.open('figure', { id: object.id, class: 'object object-image', style });
 
-  html.open('figure', { id: obj.id, class: 'object object-image', style });
-  html.tag('img', {
-    src,
+  if (asset === undefined) {
+    // Reported rather than rendered as a broken image: a missing asset is a
+    // validation finding, and a silent empty box is invisible to a screen reader.
+    html.tag('p', { class: 'missing-asset' }, `Image asset ${object.assetId} not found`);
+    html.close('figure');
+    return html.toString();
+  }
+
+  // Decorative images take alt="" so assistive technology skips them; anything
+  // else uses approved alt text (never the draft, which has not been reviewed).
+  const alt = object.accessibility.isDecorative
+    ? ''
+    : (object.altTextApproved ?? object.accessibility.altText ?? object.purpose);
+
+  html.voidTag('img', {
+    src: `assets/${asset.id}-${asset.fileName}`,
     alt,
-    class: 'image-content',
+    width: asset.dimensions.width,
+    height: asset.dimensions.height,
     loading: 'lazy',
+    decoding: 'async',
+    class: 'image-content',
+    ...(object.accessibility.isDecorative ? { role: 'presentation' } : {}),
+    ...(describedBy(object) === undefined ? {} : { 'aria-describedby': describedBy(object) }),
   });
 
-  if (accessibility.longDescription) {
-    html.open('figcaption', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('figcaption');
-  }
-
+  appendLongDescription(html, object);
   html.close('figure');
-
   return html.toString();
 }
 
-function renderIconObject(obj: DocumentObject, style: string, html: HTMLBuilder): string {
-  const iconObj = obj as any; // IconObject
-  const accessibility = obj.accessibility;
+function renderIconObject(
+  object: Extract<DocumentObject, { kind: 'icon' }>,
+  style: string
+): string {
+  const html = new HTMLBuilder();
+  const isDecorative = object.accessibility.isDecorative;
 
-  html.open('span', { id: obj.id, class: `object object-icon icon-${iconObj.iconFamily} icon-${iconObj.iconName}`, style, role: 'img', 'aria-label': accessibility.altText || obj.purpose });
-  html.raw(`<!-- ${iconObj.iconName} -->`);
+  html.open('span', {
+    id: object.id,
+    class: `object object-icon icon-${object.iconFamily} icon-${object.iconName}`,
+    style,
+    'data-icon': object.iconName,
+    ...(isDecorative
+      ? { 'aria-hidden': true }
+      : {
+          role: 'img',
+          'aria-label': object.accessibility.altText ?? object.semanticAssignment ?? object.purpose,
+        }),
+  });
   html.close('span');
 
-  if (accessibility.longDescription) {
-    html.open('div', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('div');
-  }
-
+  appendLongDescription(html, object);
   return html.toString();
 }
 
-function renderChartObject(obj: DocumentObject, project: DocumentProject, style: string, html: HTMLBuilder): string {
-  const chartObj = obj as any; // ChartObject
-  const chart = project.charts[chartObj.chartId];
-  const accessibility = obj.accessibility;
+function renderChartObject(
+  object: Extract<DocumentObject, { kind: 'chart' }>,
+  project: DocumentProject,
+  style: string
+): string {
+  const html = new HTMLBuilder();
+  const chart = project.charts[object.chartId];
 
-  if (!chart) {
-    html.open('div', { id: obj.id, class: 'object object-chart missing', style });
-    html.raw('Chart not found');
-    html.close('div');
+  html.open('figure', { id: object.id, class: 'object object-chart', style });
+
+  if (chart === undefined) {
+    html.tag('p', { class: 'missing-chart' }, `Chart ${object.chartId} not found`);
+    html.close('figure');
     return html.toString();
   }
 
-  html.open('figure', { id: obj.id, class: 'object object-chart', style });
+  const dataset = project.datasets[chart.spec.datasetId];
 
-  // Render SVG chart
-  if (chart.geometry) {
-    const svg = generateChartSVG(chart);
-    html.raw(svg);
+  // Table first in DOM order: it is the primary representation for screen reader
+  // users, and the chart image is the secondary one (AC F-4.x §2).
+  if (dataset !== undefined) {
+    html.unsafeRaw(renderChartDataTable(chart, dataset));
   }
 
-  // Accessible table
-  html.open('table', { class: 'chart-data-table', 'aria-hidden': 'true' });
-  html.open('caption', { class: 'sr-only' });
-  html.raw(`${chart.spec.title} - Data Table`);
-  html.close('caption');
-  html.raw(generateChartTable(chart, project));
-  html.close('table');
-
-  // Narrative
-  if (accessibility.longDescription) {
-    html.open('figcaption', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('figcaption');
+  if (chart.geometry !== undefined) {
+    html.open('div', {
+      class: 'chart-svg-container',
+      role: 'img',
+      'aria-label': object.accessibility.altText ?? chart.spec.title,
+      ...(describedBy(object) === undefined ? {} : { 'aria-describedby': describedBy(object) }),
+    });
+    html.unsafeRaw(renderChartSVG(chart));
+    html.close('div');
   }
 
+  appendLongDescription(html, object);
   html.close('figure');
-
   return html.toString();
 }
 
-function renderDiagramObject(obj: DocumentObject, project: DocumentProject, style: string, html: HTMLBuilder): string {
-  const diagramObj = obj as any; // DiagramObject
-  const diagram = project.diagrams[diagramObj.diagramId];
-  const accessibility = obj.accessibility;
+function renderDiagramObject(
+  object: Extract<DocumentObject, { kind: 'diagram' }>,
+  project: DocumentProject,
+  style: string
+): string {
+  const html = new HTMLBuilder();
+  const diagram = project.diagrams[object.diagramId];
 
-  if (!diagram) {
-    html.open('div', { id: obj.id, class: 'object object-diagram missing', style });
-    html.raw('Diagram not found');
-    html.close('div');
+  html.open('figure', { id: object.id, class: 'object object-diagram', style });
+
+  if (diagram === undefined) {
+    html.tag('p', { class: 'missing-diagram' }, `Diagram ${object.diagramId} not found`);
+    html.close('figure');
     return html.toString();
   }
 
-  html.open('figure', { id: obj.id, class: 'object object-diagram', style });
+  // Node list precedes the drawing, for the same reason the chart table does.
+  html.unsafeRaw(renderDiagramNodeList(diagram));
 
-  // Render SVG diagram
-  const svg = generateDiagramSVG(diagram);
-  html.raw(svg);
+  html.open('div', {
+    class: 'diagram-svg-container',
+    role: 'img',
+    'aria-label': object.accessibility.altText ?? `${diagram.type} diagram`,
+    ...(describedBy(object) === undefined ? {} : { 'aria-describedby': describedBy(object) }),
+  });
+  html.unsafeRaw(renderDiagramSVG(diagram));
+  html.close('div');
 
-  // Accessible node list
-  html.open('nav', { class: 'diagram-nodes sr-only', 'aria-label': 'Diagram nodes' });
-  html.open('ul');
-  for (const node of diagram.nodes) {
-    html.open('li');
-    html.raw(`${node.label} (${node.type})`);
-    const outgoing = diagram.edges.filter(e => e.from === node.id);
-    if (outgoing.length > 0) {
-      html.raw(' → ');
-      html.raw(outgoing.map(e => {
-        const target = diagram.nodes.find(n => n.id === e.to);
-        return `${e.label || ''} ${target?.label || e.to}`;
-      }).join(', '));
-    }
-    html.close('li');
-  }
-  html.close('ul');
-  html.close('nav');
-
-  if (accessibility.longDescription) {
-    html.open('figcaption', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('figcaption');
-  }
-
+  appendLongDescription(html, object);
   html.close('figure');
-
   return html.toString();
 }
 
-function renderTableObject(obj: DocumentObject, style: string, html: HTMLBuilder): string {
-  const tableObj = obj as any; // TableObject
-  const accessibility = obj.accessibility;
+function renderTableObject(
+  object: Extract<DocumentObject, { kind: 'table' }>,
+  style: string
+): string {
+  const html = new HTMLBuilder();
 
-  html.open('figure', { id: obj.id, class: 'object object-table', style });
+  html.open('figure', { id: object.id, class: 'object object-table', style });
+  html.open('table', {
+    ...(describedBy(object) === undefined ? {} : { 'aria-describedby': describedBy(object) }),
+  });
 
-  if (tableObj.caption) {
-    html.tag('figcaption', { class: 'table-caption' }, tableObj.caption);
+  if (object.caption !== undefined && object.caption !== '') {
+    html.tag('caption', {}, object.caption);
   }
 
-  html.open('table', { class: 'data-table', role: 'table' });
   html.open('thead');
   html.open('tr');
-  for (const header of tableObj.headers) {
+  for (const header of object.headers) {
     html.tag('th', { scope: 'col' }, header);
   }
   html.close('tr');
   html.close('thead');
+
   html.open('tbody');
-  for (const row of tableObj.rows) {
+  for (const row of object.rows) {
     html.open('tr');
-    for (const cell of row) {
-      html.tag('td', {}, cell);
+    for (const [index, cell] of row.entries()) {
+      // The first cell is a row header, so a screen reader can announce
+      // "<row>, <column>: <value>" while navigating the grid.
+      if (index === 0) {
+        html.tag('th', { scope: 'row' }, cell);
+      } else {
+        html.tag('td', {}, cell);
+      }
     }
     html.close('tr');
   }
   html.close('tbody');
   html.close('table');
 
-  if (accessibility.longDescription) {
-    html.open('figcaption', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('figcaption');
-  }
-
+  appendLongDescription(html, object);
   html.close('figure');
-
   return html.toString();
 }
 
-function renderShapeObject(obj: DocumentObject, style: string, html: HTMLBuilder): string {
-  const shapeObj = obj as any; // ShapeObject
-  const accessibility = obj.accessibility;
+function renderShapeObject(
+  object: Extract<DocumentObject, { kind: 'shape' }>,
+  style: string
+): string {
+  const html = new HTMLBuilder();
+  const isDecorative = object.accessibility.isDecorative;
 
-  html.open('div', { id: obj.id, class: `object object-shape shape-${shapeObj.shapeType}`, style, role: 'img', 'aria-label': accessibility.altText || obj.purpose });
+  html.open('div', {
+    id: object.id,
+    class: `object object-shape shape-${object.shapeType}`,
+    style,
+    ...(isDecorative
+      ? { 'aria-hidden': true }
+      : {
+          role: 'img',
+          'aria-label': object.accessibility.altText ?? object.purpose,
+        }),
+  });
   html.close('div');
 
-  if (accessibility.longDescription) {
-    html.open('div', { id: `${obj.id}-desc`, class: 'sr-only' });
-    html.raw(accessibility.longDescription);
-    html.close('div');
-  }
-
+  appendLongDescription(html, object);
   return html.toString();
 }
 
 // ============================================================================
-// SVG Generation Helpers
+// SVG and table fragments
 // ============================================================================
 
-function generateChartSVG(chart: Chart): string {
-  const { spec, geometry } = chart;
-  if (!geometry) return '<svg class="chart-svg" aria-hidden="true"></svg>';
+/**
+ * Chart SVG from stored geometry.
+ *
+ * Geometry is used verbatim — it is the same geometry the integrity checks
+ * verified against the data, so re-deriving positions here could disagree with
+ * what was approved.
+ */
+function renderChartSVG(chart: Chart): string {
+  const geometry = chart.geometry;
+  if (geometry === undefined) return '';
 
   const width = 500;
   const height = 300;
-  const margin = { top: 40, right: 40, bottom: 60, left: 60 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
+  const parts = [
+    `<svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true" focusable="false">`,
+  ];
 
-  let svg = `<svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true" role="img">`;
+  parts.push(
+    `<line class="axis axis-y" x1="${geometry.axes.y.x}" y1="${geometry.axes.y.y}" x2="${geometry.axes.y.x}" y2="${geometry.axes.y.y + geometry.axes.y.h}" stroke="currentColor" />`
+  );
+  parts.push(
+    `<line class="axis axis-x" x1="${geometry.axes.x.x}" y1="${geometry.axes.x.y}" x2="${geometry.axes.x.x + geometry.axes.x.w}" y2="${geometry.axes.x.y}" stroke="currentColor" />`
+  );
 
-  // Title
-  svg += `<title>${spec.title}</title>`;
-
-  // Axes
-  svg += `<g class="axes" transform="translate(${margin.left},${margin.top})">`;
-
-  // Y axis
-  svg += `<line class="axis y" x1="0" y1="0" x2="0" y2="${plotHeight}" />`;
-  // X axis
-  svg += `<line class="axis x" x1="0" y1="${plotHeight}" x2="${plotWidth}" y2="${plotHeight}" />`;
-
-  // Grid lines
-  if (spec.type === 'horizontal_bar' || spec.type === 'vertical_bar') {
-    // Bar chart
-    const barWidth = plotWidth / Math.max(1, geometry.bars.length);
-    for (let i = 0; i < geometry.bars.length; i++) {
-      const bar = geometry.bars[i];
-      const series = spec.series[bar.seriesIndex];
-      const x = i * barWidth + barWidth * 0.1;
-      const w = barWidth * 0.8;
-      const h = bar.h;
-
-      svg += `<rect class="bar series-${bar.seriesIndex}" x="${x}" y="${plotHeight - h}" width="${w}" height="${h}" fill="${series.color}" />`;
-    }
-  } else if (spec.type === 'line') {
-    // Line chart
-    for (let i = 0; i < geometry.lines.length; i++) {
-      const line = geometry.lines[i];
-      const series = spec.series[line.seriesIndex];
-      const points = line.points.map(p => `${p.x},${plotHeight - p.y}`).join(' ');
-      svg += `<polyline class="line series-${i}" points="${points}" stroke="${series.color}" stroke-width="2" fill="none" />`;
-    }
+  for (const bar of geometry.bars) {
+    const series = chart.spec.series[bar.seriesIndex];
+    const fill = series?.color ?? 'currentColor';
+    parts.push(
+      `<rect class="bar series-${bar.seriesIndex}" x="${bar.x}" y="${bar.y}" width="${bar.w}" height="${bar.h}" fill="${fill}" />`
+    );
   }
 
-  svg += '</g></svg>';
-  return svg;
+  for (const line of geometry.lines) {
+    const series = chart.spec.series[line.seriesIndex];
+    const stroke = series?.color ?? 'currentColor';
+    const points = line.points.map((p) => `${p.x},${p.y}`).join(' ');
+    parts.push(
+      `<polyline class="line series-${line.seriesIndex}" points="${points}" stroke="${stroke}" stroke-width="2" fill="none" />`
+    );
+  }
+
+  parts.push('</svg>');
+  return parts.join('');
 }
 
-function generateDiagramSVG(diagram: Diagram): string {
-  const bounds = getDiagramBounds(diagram);
+function renderChartDataTable(chart: Chart, dataset: Dataset): string {
+  const html = new HTMLBuilder();
+
+  html.open('table', { class: 'chart-data-table' });
+  html.tag('caption', {}, `${chart.spec.title} — data table`);
+
+  html.open('thead');
+  html.open('tr');
+  for (const column of dataset.columns) {
+    html.tag('th', { scope: 'col' }, column.name);
+  }
+  html.close('tr');
+  html.close('thead');
+
+  html.open('tbody');
+  for (let row = 0; row < dataset.rowCount; row++) {
+    html.open('tr');
+    for (const [index, column] of dataset.columns.entries()) {
+      const raw = column.values[row];
+      const value =
+        raw === undefined || raw === ''
+          ? ''
+          : raw instanceof Date
+            ? (raw.toISOString().split('T')[0] ?? '')
+            : String(raw);
+
+      if (index === 0) {
+        html.tag('th', { scope: 'row' }, value);
+      } else {
+        html.tag('td', {}, value);
+      }
+    }
+    html.close('tr');
+  }
+  html.close('tbody');
+  html.close('table');
+
+  return html.toString();
+}
+
+function renderDiagramSVG(diagram: Diagram): string {
   const padding = 40;
+  const bounds = diagramBounds(diagram);
+  const width = bounds.w + 2 * padding;
+  const height = bounds.h + 2 * padding;
 
-  let svg = `<svg class="diagram-svg" width="${bounds.w + 2 * padding}" height="${bounds.h + 2 * padding}" viewBox="${bounds.x - padding} ${bounds.y - padding} ${bounds.w + 2 * padding} ${bounds.h + 2 * padding}" aria-hidden="true" role="img">`;
-  svg += `<title>${diagram.type}</title>`;
+  const parts = [
+    `<svg class="diagram-svg" width="${width}" height="${height}" ` +
+      `viewBox="${bounds.x - padding} ${bounds.y - padding} ${width} ${height}" aria-hidden="true" focusable="false">`,
+  ];
 
-  // Edges
+  const nodesById = new Map(diagram.nodes.map((n) => [n.id, n]));
+
   for (const edge of diagram.edges) {
-    const from = diagram.nodes.find(n => n.id === edge.from);
-    const to = diagram.nodes.find(n => n.id === edge.to);
-    if (!from || !to) continue;
+    const from = nodesById.get(edge.from);
+    const to = nodesById.get(edge.to);
+    if (from === undefined || to === undefined) continue;
 
     const fromX = from.bounds.x + from.bounds.w / 2;
     const fromY = from.bounds.y + from.bounds.h / 2;
     const toX = to.bounds.x + to.bounds.w / 2;
     const toY = to.bounds.y + to.bounds.h / 2;
 
-    svg += `<line class="edge" x1="${fromX}" y1="${fromY}" x2="${toX}" y2="${toY}" stroke="currentColor" stroke-width="2" />`;
+    parts.push(
+      `<line class="edge" x1="${fromX}" y1="${fromY}" x2="${toX}" y2="${toY}" stroke="currentColor" stroke-width="2" />`
+    );
 
-    // Arrowhead
-    const angle = Math.atan2(toY - fromY, toX - fromX);
-    const arrowSize = 8;
-    const arrowX = toX - Math.cos(angle) * (to.bounds.w / 2 + 4);
-    const arrowY = toY - Math.sin(angle) * (to.bounds.h / 2 + 4);
-    svg += `<polygon class="arrowhead" points="${arrowX},${arrowY} ${arrowX - Math.cos(angle - Math.PI / 6) * arrowSize},${arrowY - Math.sin(angle - Math.PI / 6) * arrowSize} ${arrowX - Math.cos(angle + Math.PI / 6) * arrowSize},${arrowY - Math.sin(angle + Math.PI / 6) * arrowSize}" fill="currentColor" />`;
-
-    if (edge.label) {
-      const midX = (fromX + toX) / 2;
-      const midY = (fromY + toY) / 2;
-      svg += `<text class="edge-label" x="${midX}" y="${midY}" text-anchor="middle">${edge.label}</text>`;
+    if (edge.label !== undefined && edge.label !== '') {
+      parts.push(
+        `<text class="edge-label" x="${(fromX + toX) / 2}" y="${(fromY + toY) / 2}" text-anchor="middle">${escapeXml(edge.label)}</text>`
+      );
     }
   }
 
-  // Nodes
   for (const node of diagram.nodes) {
-    svg += `<rect class="node node-${node.type}" x="${node.bounds.x}" y="${node.bounds.y}" width="${node.bounds.w}" height="${node.bounds.h}" rx="4" ry="4" stroke="currentColor" stroke-width="2" fill="white" />`;
-    svg += `<text class="node-label" x="${node.bounds.x + node.bounds.w / 2}" y="${node.bounds.y + node.bounds.h / 2}" text-anchor="middle" dominant-baseline="middle">${node.label}</text>`;
+    parts.push(
+      `<rect class="node node-${node.type}" x="${node.bounds.x}" y="${node.bounds.y}" ` +
+        `width="${node.bounds.w}" height="${node.bounds.h}" rx="4" ry="4" stroke="currentColor" stroke-width="2" fill="#ffffff" />`
+    );
+    parts.push(
+      `<text class="node-label" x="${node.bounds.x + node.bounds.w / 2}" y="${node.bounds.y + node.bounds.h / 2}" ` +
+        `text-anchor="middle" dominant-baseline="middle">${escapeXml(node.label)}</text>`
+    );
   }
 
-  svg += '</svg>';
-  return svg;
+  parts.push('</svg>');
+  return parts.join('');
 }
 
-function getDiagramBounds(diagram: Diagram): Bounds {
+function renderDiagramNodeList(diagram: Diagram): string {
+  const html = new HTMLBuilder();
+  const nodesById = new Map(diagram.nodes.map((n) => [n.id, n]));
+
+  html.open('nav', { class: 'diagram-nodes', 'aria-label': 'Diagram nodes and connections' });
+  html.open('ul');
+
+  for (const node of diagram.nodes) {
+    html.open('li');
+    html.text(`${node.label} (${node.type})`);
+
+    const outgoing = diagram.edges.filter((e) => e.from === node.id);
+    if (outgoing.length > 0) {
+      html.open('ul');
+      for (const edge of outgoing) {
+        const target = nodesById.get(edge.to);
+        const targetLabel = target?.label ?? edge.to;
+        html.tag(
+          'li',
+          {},
+          edge.label !== undefined && edge.label !== ''
+            ? `${edge.label}: leads to ${targetLabel}`
+            : `leads to ${targetLabel}`
+        );
+      }
+      html.close('ul');
+    }
+
+    html.close('li');
+  }
+
+  html.close('ul');
+  html.close('nav');
+  return html.toString();
+}
+
+function diagramBounds(diagram: Diagram): { x: number; y: number; w: number; h: number } {
   if (diagram.nodes.length === 0) return { x: 0, y: 0, w: 400, h: 300 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
   for (const node of diagram.nodes) {
     minX = Math.min(minX, node.bounds.x);
     minY = Math.min(minY, node.bounds.y);
     maxX = Math.max(maxX, node.bounds.x + node.bounds.w);
     maxY = Math.max(maxY, node.bounds.y + node.bounds.h);
   }
+
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-}
-
-function generateChartTable(chart: Chart, project: DocumentProject): string {
-  const dataset = project.datasets[chart.spec.datasetId];
-  if (!dataset) return '';
-
-  let html = '<thead><tr>';
-  for (const col of dataset.columns) {
-    html += `<th scope="col">${col.name}</th>`;
-  }
-  html += '</tr></thead><tbody>';
-
-  for (let row = 0; row < dataset.rowCount; row++) {
-    html += '<tr>';
-    for (const col of dataset.columns) {
-      const val = col.values[row];
-      html += `<td>${val ?? ''}</td>`;
-    }
-    html += '</tr>';
-  }
-
-  html += '</tbody>';
-  return html;
-}
-
-// ============================================================================
-// Template Regions
-// ============================================================================
-
-interface TemplateRegion {
-  name: string;
-  bounds: Bounds;
-}
-
-function getTemplateRegions(template: PageTemplate): TemplateRegion[] {
-  const margin = 72;
-  const contentWidth = 595 - 2 * margin;
-  const contentHeight = 842 - 2 * margin;
-
-  const regions: Record<PageTemplate, TemplateRegion[]> = {
-    cover: [
-      { name: 'title', bounds: { x: margin, y: margin, w: contentWidth, h: contentHeight * 0.4 } },
-      { name: 'subtitle', bounds: { x: margin, y: margin + contentHeight * 0.4, w: contentWidth, h: contentHeight * 0.2 } },
-      { name: 'image', bounds: { x: margin, y: margin + contentHeight * 0.6, w: contentWidth, h: contentHeight * 0.3 } },
-      { name: 'footer', bounds: { x: margin, y: margin + contentHeight * 0.9, w: contentWidth, h: contentHeight * 0.1 } },
-    ],
-    'text-led': [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'content', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight - 120 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    'text-side-image': [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'text', bounds: { x: margin, y: margin + 60, w: contentWidth * 0.6, h: contentHeight - 120 } },
-      { name: 'image', bounds: { x: margin + contentWidth * 0.65, y: margin + 60, w: contentWidth * 0.35, h: contentHeight - 120 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    'full-width-image-caption': [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'image', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight * 0.6 } },
-      { name: 'caption', bounds: { x: margin, y: margin + 60 + contentHeight * 0.6, w: contentWidth, h: 80 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    statistics: [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'stats-grid', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight - 120 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    chart: [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'chart', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight - 120 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    diagram: [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'diagram', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight - 120 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    'participant-story': [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'quote', bounds: { x: margin, y: margin + 60, w: contentWidth, h: 150 } },
-      { name: 'content', bounds: { x: margin, y: margin + 210, w: contentWidth, h: contentHeight - 270 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    recommendations: [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'list', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight - 120 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-    'conclusion-contact': [
-      { name: 'header', bounds: { x: margin, y: margin, w: contentWidth, h: 60 } },
-      { name: 'conclusion', bounds: { x: margin, y: margin + 60, w: contentWidth, h: contentHeight * 0.5 } },
-      { name: 'contact', bounds: { x: margin, y: margin + 60 + contentHeight * 0.5, w: contentWidth, h: contentHeight * 0.5 - 60 } },
-      { name: 'footer', bounds: { x: margin, y: 842 - margin - 60, w: contentWidth, h: 60 } },
-    ],
-  };
-
-  return regions[template] || regions['text-led'];
-}
-
-// ============================================================================
-// Style Generation
-// ============================================================================
-
-function generateGlobalStyles(project: DocumentProject): string {
-  const theme = project.theme;
-  const colors = theme.colors || {};
-  const fonts = theme.fonts || {};
-
-  return `
-    :root {
-      --color-primary: ${colors.primary || '#1a1a2e'};
-      --color-secondary: ${colors.secondary || '#16213e'};
-      --color-accent: ${colors.accent || '#e94560'};
-      --color-background: ${colors.background || '#ffffff'};
-      --color-text: ${colors.text || '#1a1a2e'};
-      --color-text-muted: ${colors.textMuted || '#666666'};
-      --color-border: ${colors.border || '#e0e0e0'};
-      --font-primary: ${fonts.primary || 'system-ui, -apple-system, sans-serif'};
-      --font-heading: ${fonts.heading || 'Georgia, serif'};
-      --font-mono: ${fonts.mono || 'monospace'};
-      --spacing-unit: ${theme.spacing?.unit || 8}px;
-      --container-width: 595px;
-      --page-margin: 72px;
-    }
-
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: var(--font-primary); color: var(--color-text); background: var(--color-background); line-height: 1.5; }
-    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-    .skip-link { position: absolute; top: -40px; left: 0; background: var(--color-primary); color: white; padding: 8px 16px; z-index: 100; text-decoration: none; }
-    .skip-link:focus { top: 0; }
-    main { max-width: var(--container-width); margin: 0 auto; padding: var(--page-margin); }
-    .page { position: relative; width: 100%; min-height: 842px; margin-bottom: 48px; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); page-break-after: always; }
-    .region { position: relative; }
-    .object { position: absolute; }
-    .object-text { overflow: hidden; }
-    .object-text h1 { font-size: 2.5rem; font-family: var(--font-heading); margin: 0.5rem 0; }
-    .object-text h2 { font-size: 2rem; font-family: var(--font-heading); margin: 0.5rem 0; }
-    .object-text h3 { font-size: 1.5rem; font-family: var(--font-heading); margin: 0.5rem 0; }
-    .object-text h4 { font-size: 1.25rem; font-family: var(--font-heading); margin: 0.5rem 0; }
-    .object-text p { margin: 0.5rem 0; }
-    .object-text ul, .object-text ol { margin: 0.5rem 0; padding-left: 1.5rem; }
-    .object-text li { margin: 0.25rem 0; }
-    .object-text blockquote { border-left: 4px solid var(--color-accent); padding-left: 1rem; margin: 1rem 0; font-style: italic; }
-    .object-text figcaption { font-size: 0.875rem; color: var(--color-text-muted); margin-top: 0.5rem; }
-    .object-image img { max-width: 100%; height: auto; display: block; }
-    .object-table table { width: 100%; border-collapse: collapse; }
-    .object-table th, .object-table td { border: 1px solid var(--color-border); padding: 8px; text-align: left; }
-    .object-table caption { caption-side: top; font-weight: bold; margin-bottom: 0.5rem; }
-    .chart-svg, .diagram-svg { max-width: 100%; height: auto; }
-    .chart-data-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.75rem; }
-    .chart-data-table th, .chart-data-table td { border: 1px solid var(--color-border); padding: 4px; text-align: left; }
-    .diagram-nodes ul { list-style: none; padding: 0; }
-    .diagram-nodes li { padding: 4px 0; font-size: 0.875rem; }
-    @media print { .page { box-shadow: none; margin: 0; page-break-after: always; } body { background: white; } }
-  `;
-}
-
-function generatePageStyles(layout: ResolvedLayout): string {
-  // Template-specific styles could go here
-  return '';
-}
-
-// ============================================================================
-// HTML Builder Utility
-// ============================================================================
-
-class HTMLBuilder {
-  private parts: string[] = [];
-  private indent = 0;
-  private readonly indentStr = '  ';
-
-  open(tag: string, attrs: Record<string, string | number | boolean | undefined> = {}): this {
-    this.parts.push(`${this.indentStr.repeat(this.indent)}<${tag}${this.formatAttrs(attrs)}>`);
-    this.indent++;
-    return this;
-  }
-
-  close(tag: string): this {
-    this.indent--;
-    this.parts.push(`${this.indentStr.repeat(this.indent)}</${tag}>`);
-    return this;
-  }
-
-  tag(tag: string, attrs: Record<string, string | number | boolean | undefined>, content: string): this {
-    this.parts.push(`${this.indentStr.repeat(this.indent)}<${tag}${this.formatAttrs(attrs)}>${content}</${tag}>`);
-    return this;
-  }
-
-  raw(html: string): this {
-    this.parts.push(html);
-    return this;
-  }
-
-  toString(): string {
-    return this.parts.join('\n');
-  }
-
-  private formatAttrs(attrs: Record<string, string | number | boolean | undefined>): string {
-    return Object.entries(attrs)
-      .filter(([, v]) => v !== undefined && v !== false)
-      .map(([k, v]) => v === true ? ` ${k}` : ` ${k}="${v}"`)
-      .join('');
-  }
 }
 
 // ============================================================================
 // Export Bundle
 // ============================================================================
 
-export interface ExportBundle {
-  html: string;
-  assets: Array<{ id: string; type: string; data: Uint8Array; filename: string }>;
-  manifest: string; // JSON manifest
+export interface BundleAsset {
+  /** Path within the bundle, e.g. `assets/ast_abc-photo.jpg`. */
+  path: string;
+  assetId: string;
+  mimeType: string;
+  /** Content hash, for the export manifest (§28). */
+  contentHash: string;
 }
 
-export function createExportBundle(project: DocumentProject, layout: ResolvedLayout): ExportBundle {
+export interface ExportBundle {
+  html: string;
+  /** Asset manifest. Bytes are attached by the app, which owns blob storage. */
+  assets: BundleAsset[];
+  manifest: string;
+}
+
+/**
+ * Builds the accessible HTML companion bundle.
+ *
+ * Asset *bytes* are not read here: this package is pure and has no storage
+ * access. It emits the paths the HTML references, and `apps/web` fills them from
+ * IndexedDB, which keeps the reference and the file name in one place.
+ */
+export function createExportBundle(
+  project: DocumentProject,
+  layout: ResolvedLayout = resolveLayout(project)
+): ExportBundle {
   const html = renderProjectHTML(project, layout);
 
-  // Collect assets
-  const assets: ExportBundle['assets'] = [];
-  for (const asset of Object.values(project.assets)) {
-    assets.push({
-      id: asset.id,
-      type: asset.mimeType,
-      data: new Uint8Array(), // Would be filled from blob
-      filename: asset.fileName,
-    });
-  }
+  const assets: BundleAsset[] = Object.values(project.assets)
+    .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined)
+    .map((asset) => ({
+      path: `assets/${asset.id}-${asset.fileName}`,
+      assetId: asset.id,
+      mimeType: asset.mimeType,
+      contentHash: asset.contentHash,
+    }));
 
-  // Generate manifest
-  const manifest = JSON.stringify({
-    projectId: project.id,
-    title: project.title,
-    version: project.currentVersion,
-    pageCount: project.pageOrder.length,
-    objectCount: Object.keys(project.objects).length,
-    assetCount: Object.keys(project.assets).length,
-    generatedAt: new Date().toISOString(),
-  }, null, 2);
+  const manifest = JSON.stringify(
+    {
+      title: project.title,
+      language: project.language,
+      documentType: project.documentType,
+      version: project.currentVersion,
+      pageCount: layout.pages.length,
+      assets: assets.map(({ path, contentHash, mimeType }) => ({ path, contentHash, mimeType })),
+      layoutDiagnostics: layout.diagnostics,
+      generatedAt: project.updatedAt,
+    },
+    null,
+    2
+  );
 
   return { html, assets, manifest };
 }
+
+/** Convenience: resolve layout and render in one call. */
+export function renderProject(project: DocumentProject): string {
+  return renderProjectHTML(project, resolveLayout(project));
+}
+
+export { generateGlobalStyles };

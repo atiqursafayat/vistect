@@ -1,104 +1,143 @@
 // ============================================================================
 // Chart Narrative Generation
 // ============================================================================
+//
+// Deterministic, template-driven prose describing a chart (spec §13.5). No model
+// is involved: every sentence is derived arithmetically from the dataset, so the
+// narrative is a *deterministic* claim (§16.1) and can be regenerated
+// identically. Anything requiring interpretation belongs in an agent-recorded
+// analysis, not here.
 
-import type { ChartSpec, Dataset, ChartGeometry } from '../index';
+import type { ChartSpec, Dataset, DataColumn } from '@vistect/domain/schema';
+import { escapeHtml } from '@vistect/domain/text';
 
 export interface NarrativeTemplate {
   title: string;
   sentences: string[];
 }
 
-export function generateChartNarrative(spec: ChartSpec, dataset: Dataset, geometry: ChartGeometry): NarrativeTemplate {
+/** Numeric values of a column, or `null` when the column is not numeric or empty. */
+function numericValues(column: DataColumn | undefined): number[] | null {
+  if (column?.type !== 'number') return null;
+  const values = column.values.filter((v): v is number => typeof v === 'number');
+  return values.length > 0 ? values : null;
+}
+
+interface NumericSummary {
+  min: number;
+  max: number;
+  mean: number;
+  minIndex: number;
+  maxIndex: number;
+}
+
+function summarise(values: number[]): NumericSummary {
+  const first = values[0] ?? 0;
+  let min = first;
+  let max = first;
+  let minIndex = 0;
+  let maxIndex = 0;
+  let total = 0;
+
+  for (const [index, value] of values.entries()) {
+    total += value;
+    if (value < min) {
+      min = value;
+      minIndex = index;
+    }
+    if (value > max) {
+      max = value;
+      maxIndex = index;
+    }
+  }
+
+  return { min, max, mean: total / values.length, minIndex, maxIndex };
+}
+
+const formatNumber = (value: number): string =>
+  Number.isInteger(value) ? String(value) : value.toFixed(2);
+
+export function generateChartNarrative(spec: ChartSpec, dataset: Dataset): NarrativeTemplate {
   const sentences: string[] = [];
+  const isHorizontal = spec.type === 'horizontal_bar';
+  const categoryCol = dataset.columns.find((c) => c.type === 'string' || c.type === 'date');
 
-  // Opening
-  sentences.push(`${spec.title} shows ${spec.series.length} series across ${dataset.rowCount} data points.`);
+  const categoryLabel = (index: number): string => {
+    const raw = categoryCol?.values[index];
+    return raw === undefined ? `point ${index + 1}` : String(raw);
+  };
 
-  // Axis description
-  sentences.push(`The ${spec.xAxis.title.toLowerCase()} is on the ${spec.type === 'horizontal_bar' ? 'vertical' : 'horizontal'} axis, and ${spec.yAxis.title.toLowerCase()} is on the ${spec.type === 'horizontal_bar' ? 'horizontal' : 'vertical'} axis.`);
+  sentences.push(
+    `${spec.title} shows ${spec.series.length} ${spec.series.length === 1 ? 'series' : 'series'} across ${dataset.rowCount} data points.`
+  );
 
-  // Series overview
-  if (spec.series.length === 1) {
-    const series = spec.series[0];
-    const col = dataset.columns.find(c => c.id === series.dataColumnId);
-    if (col && col.type === 'number') {
-      const values = col.values.filter(v => typeof v === 'number') as number[];
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const avg = values.reduce((a, b) => a + b, 0) / values.length;
-      sentences.push(`${series.name} ranges from ${min} to ${max}, with an average of ${avg.toFixed(2)}.`);
-    }
-  } else {
-    const seriesNames = spec.series.map(s => s.name).join(', ');
-    sentences.push(`The chart compares ${seriesNames}.`);
+  sentences.push(
+    `The ${spec.xAxis.title.toLowerCase()} is on the ${isHorizontal ? 'vertical' : 'horizontal'} axis, and ${spec.yAxis.title.toLowerCase()} is on the ${isHorizontal ? 'horizontal' : 'vertical'} axis.`
+  );
+
+  if (spec.series.length > 1) {
+    sentences.push(`The chart compares ${spec.series.map((s) => s.name).join(', ')}.`);
   }
 
-  // Extremes
   for (const series of spec.series) {
-    const col = dataset.columns.find(c => c.id === series.dataColumnId);
-    if (col && col.type === 'number') {
-      const values = col.values.filter(v => typeof v === 'number') as number[];
-      const maxIdx = values.indexOf(Math.max(...values));
-      const minIdx = values.indexOf(Math.min(...values));
-      if (maxIdx >= 0 && minIdx >= 0) {
-        const categoryCol = dataset.columns.find(c => c.type === 'string' || c.type === 'date');
-        const maxCat = categoryCol ? String(categoryCol.values[maxIdx]) : `point ${maxIdx}`;
-        const minCat = categoryCol ? String(categoryCol.values[minIdx]) : `point ${minIdx}`;
-        sentences.push(`${series.name} peaks at ${Math.max(...values)} (${maxCat}) and is lowest at ${Math.min(...values)} (${minCat}).`);
+    const values = numericValues(dataset.columns.find((c) => c.id === series.dataColumnId));
+    if (values === null) continue;
+
+    const { min, max, mean, minIndex, maxIndex } = summarise(values);
+
+    if (spec.series.length === 1) {
+      sentences.push(
+        `${series.name} ranges from ${formatNumber(min)} to ${formatNumber(max)}, with an average of ${mean.toFixed(2)}.`
+      );
+    }
+
+    if (min === max) {
+      sentences.push(`${series.name} is constant at ${formatNumber(min)}.`);
+    } else {
+      sentences.push(
+        `${series.name} peaks at ${formatNumber(max)} (${categoryLabel(maxIndex)}) and is lowest at ${formatNumber(min)} (${categoryLabel(minIndex)}).`
+      );
+    }
+
+    if (spec.type === 'line' && values.length >= 2) {
+      const first = values[0] ?? 0;
+      const last = values[values.length - 1] ?? 0;
+      // 10% band avoids reporting a "trend" for noise. Zero-crossing series use
+      // an absolute comparison, since a ratio against 0 is meaningless.
+      const threshold = Math.abs(first) * 0.1;
+      if (last > first + threshold) {
+        sentences.push(
+          `${series.name} shows an increasing trend from ${formatNumber(first)} to ${formatNumber(last)}.`
+        );
+      } else if (last < first - threshold) {
+        sentences.push(
+          `${series.name} shows a decreasing trend from ${formatNumber(first)} to ${formatNumber(last)}.`
+        );
+      } else {
+        sentences.push(
+          `${series.name} remains relatively stable around ${((first + last) / 2).toFixed(2)}.`
+        );
       }
     }
   }
 
-  // Trend (for line charts)
-  if (spec.type === 'line') {
-    for (const series of spec.series) {
-      const col = dataset.columns.find(c => c.id === series.dataColumnId);
-      if (col && col.type === 'number') {
-        const values = col.values.filter(v => typeof v === 'number') as number[];
-        if (values.length >= 2) {
-          const first = values[0];
-          const last = values[values.length - 1];
-          if (last > first * 1.1) {
-            sentences.push(`${series.name} shows an increasing trend from ${first} to ${last}.`);
-          } else if (last < first * 0.9) {
-            sentences.push(`${series.name} shows a decreasing trend from ${first} to ${last}.`);
-          } else {
-            sentences.push(`${series.name} remains relatively stable around ${((first + last) / 2).toFixed(2)}.`);
-          }
-        }
-      }
-    }
-  }
-
-  // Source note
-  if (spec.sourceNote) {
+  if (spec.sourceNote !== undefined && spec.sourceNote !== '') {
     sentences.push(`Source: ${spec.sourceNote}.`);
   }
 
-  return {
-    title: spec.title,
-    sentences,
-  };
+  return { title: spec.title, sentences };
 }
 
+/** Renders the narrative as a labelled region; all interpolated text is escaped. */
 export function generateNarrativeHTML(narrative: NarrativeTemplate): string {
-  let html = `<div class="chart-narrative" role="region" aria-label="Chart description">`;
-  html += `<h3>${escapeHtml(narrative.title)} - Description</h3>`;
-  html += `<p>${narrative.sentences.map(s => escapeHtml(s)).join(' ')}</p>`;
-  html += `</div>`;
-  return html;
+  return [
+    '<div class="chart-narrative" role="region" aria-label="Chart description">',
+    `<h3>${escapeHtml(narrative.title)} - Description</h3>`,
+    `<p>${narrative.sentences.map(escapeHtml).join(' ')}</p>`,
+    '</div>',
+  ].join('');
 }
 
 export function generateNarrativeText(narrative: NarrativeTemplate): string {
   return `${narrative.title}\n\n${narrative.sentences.join('\n\n')}`;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, ''');
 }

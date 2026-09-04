@@ -1,146 +1,216 @@
 // ============================================================================
 // Chart Recommendation Engine
 // ============================================================================
+//
+// Deterministic chart-type recommendation (spec §13.3). No model involved: the
+// same dataset and goal always yield the same ranked list, and each entry carries
+// the reason it was chosen so the recommendation can be staged as a decision with
+// evidence (AC F-4.x §5).
+//
+// R1 renders three chart types only (horizontal bar, vertical bar, line), so
+// goals that would normally call for a scatter or histogram are answered with the
+// closest supported type plus an explicit limitation warning.
 
-import type { Dataset, DataColumn, ChartRecommendation } from '../index';
+import type { ChartSpec, ChartType, DataColumn, Dataset } from '@vistect/domain/schema';
 
-export function recommendChartTypes(dataset: Dataset, goal: 'comparison' | 'trend' | 'composition' | 'distribution' | 'relationship'): ChartRecommendation[] {
+export type AnalysisGoal = 'comparison' | 'trend' | 'composition' | 'distribution' | 'relationship';
+
+export interface ChartRecommendation {
+  type: ChartType;
+  reason: string;
+  /** 0–100. Higher means a better structural fit for the data and goal. */
+  score: number;
+  warnings: string[];
+}
+
+/** Thresholds at which category count or label length changes the recommendation. */
+const THRESHOLDS = {
+  manyCategories: 8,
+  crowdedCategories: 15,
+  longLabel: 20,
+} as const;
+
+interface DatasetShape {
+  numeric: DataColumn[];
+  categorical: DataColumn[];
+  temporal: DataColumn[];
+  categoryCount: number;
+  maxLabelLength: number;
+}
+
+function analyseShape(dataset: Dataset): DatasetShape {
+  const categorical = dataset.columns.filter((c) => c.type === 'string');
+
+  // `Math.max(...[])` is `-Infinity`, so counts are folded explicitly.
+  let categoryCount = 0;
+  let maxLabelLength = 0;
+  for (const col of categorical) {
+    const labels = new Set(col.values.map(String));
+    categoryCount = Math.max(categoryCount, labels.size);
+    for (const label of labels) {
+      maxLabelLength = Math.max(maxLabelLength, label.length);
+    }
+  }
+
+  return {
+    numeric: dataset.columns.filter((c) => c.type === 'number'),
+    categorical,
+    temporal: dataset.columns.filter((c) => c.type === 'date'),
+    categoryCount,
+    maxLabelLength,
+  };
+}
+
+export function recommendChartTypes(dataset: Dataset, goal: AnalysisGoal): ChartRecommendation[] {
+  const shape = analyseShape(dataset);
   const recommendations: ChartRecommendation[] = [];
 
-  // Analyze dataset structure
-  const numericColumns = dataset.columns.filter(c => c.type === 'number');
-  const categoricalColumns = dataset.columns.filter(c => c.type === 'string');
-  const temporalColumns = dataset.columns.filter(c => c.type === 'date');
-  const categoryCount = Math.max(...categoricalColumns.map(c => new Set(c.values).size), 0);
-  const maxLabelLength = Math.max(...categoricalColumns.map(c => Math.max(...c.values.map(v => String(v).length))), 0);
-
-  // Rule: Time series -> line chart
-  if (temporalColumns.length > 0 && numericColumns.length > 0) {
+  // Temporal data reads as a trend; a bar chart of dates hides continuity.
+  if (shape.temporal.length > 0 && shape.numeric.length > 0) {
     recommendations.push({
       type: 'line',
-      reason: 'Dataset has temporal and numeric columns - ideal for trend visualization',
-      score: 95,
+      reason: 'Dataset has temporal and numeric columns — suited to showing change over time',
+      score: goal === 'trend' ? 98 : 95,
       warnings: [],
     });
-  }
-
-  // Rule: Many categories or long labels -> horizontal bar
-  if (categoryCount > 8 || maxLabelLength > 20) {
+  } else if (goal === 'trend') {
     recommendations.push({
-      type: 'horizontal_bar',
-      reason: `${categoryCount} categories with labels up to ${maxLabelLength} chars - horizontal bars prevent label truncation`,
-      score: 90,
-      warnings: categoryCount > 15 ? ['Many categories may still be crowded'] : [],
+      type: 'line',
+      reason: 'Trend requested, but no date column was found — the x-axis will be treated as ordinal',
+      score: 60,
+      warnings: ['A line chart implies continuity; confirm the x-axis order is meaningful'],
     });
   }
 
-  // Rule: Few categories, comparison goal -> vertical bar
-  if (categoryCount <= 8 && maxLabelLength <= 20 && goal === 'comparison') {
+  // Long labels or many categories clip in vertical bars; horizontal bars give
+  // each label a full text line.
+  if (shape.categoryCount > THRESHOLDS.manyCategories || shape.maxLabelLength > THRESHOLDS.longLabel) {
+    recommendations.push({
+      type: 'horizontal_bar',
+      reason: `${shape.categoryCount} categories with labels up to ${shape.maxLabelLength} characters — horizontal bars prevent label truncation`,
+      score: 90,
+      warnings:
+        shape.categoryCount > THRESHOLDS.crowdedCategories
+          ? [`${shape.categoryCount} categories may still be crowded; consider grouping`]
+          : [],
+    });
+  }
+
+  if (
+    goal === 'comparison' &&
+    shape.categoryCount > 0 &&
+    shape.categoryCount <= THRESHOLDS.manyCategories &&
+    shape.maxLabelLength <= THRESHOLDS.longLabel
+  ) {
     recommendations.push({
       type: 'vertical_bar',
-      reason: `${categoryCount} categories with short labels - vertical bars work well for comparison`,
+      reason: `${shape.categoryCount} categories with short labels — vertical bars make magnitude comparison direct`,
       score: 85,
       warnings: [],
     });
   }
 
-  // Rule: Composition goal with one categorical + one numeric -> horizontal bar
-  if (goal === 'composition' && categoricalColumns.length >= 1 && numericColumns.length >= 1) {
+  if (goal === 'composition' && shape.categorical.length >= 1 && shape.numeric.length >= 1) {
     recommendations.push({
       type: 'horizontal_bar',
-      reason: 'Composition analysis benefits from horizontal bars for part-to-whole comparison',
+      reason: 'Part-to-whole comparison is clearest with a single shared baseline',
       score: 80,
-      warnings: [],
+      warnings: ['Stacked composition is not available in R1; parts are shown side by side'],
     });
   }
 
-  // Rule: Distribution with numeric only -> line or vertical bar (histogram-like)
-  if (goal === 'distribution' && numericColumns.length >= 1 && categoricalColumns.length === 0) {
+  if (goal === 'distribution' && shape.numeric.length >= 1 && shape.categorical.length === 0) {
     recommendations.push({
       type: 'vertical_bar',
       reason: 'Numeric distribution can be shown as histogram-style vertical bars',
       score: 75,
-      warnings: ['Consider binning for continuous data'],
+      warnings: ['Values are not binned automatically; pre-bin continuous data'],
     });
   }
 
-  // Rule: Relationship (scatter) not supported in R1, suggest line if temporal
   if (goal === 'relationship') {
-    if (temporalColumns.length > 0) {
-      recommendations.push({
-        type: 'line',
-        reason: 'Relationship over time shown as line chart (scatter not available in R1)',
-        score: 70,
-        warnings: ['Scatter plots not available in R1'],
-      });
-    } else {
-      recommendations.push({
-        type: 'horizontal_bar',
-        reason: 'Relationship between categorical and numeric shown as horizontal bars (scatter not available in R1)',
-        score: 65,
-        warnings: ['Scatter plots not available in R1'],
-      });
-    }
+    const hasTemporal = shape.temporal.length > 0;
+    recommendations.push({
+      type: hasTemporal ? 'line' : 'horizontal_bar',
+      reason: hasTemporal
+        ? 'Relationship over time shown as a line chart'
+        : 'Relationship between a category and a measure shown as horizontal bars',
+      score: hasTemporal ? 70 : 65,
+      warnings: ['Scatter plots are not available in R1'],
+    });
   }
 
-  // Default fallback
   if (recommendations.length === 0) {
     recommendations.push({
       type: 'horizontal_bar',
-      reason: 'Default recommendation for categorical data',
+      reason: 'Default for categorical data when no stronger signal is present',
       score: 50,
-      warnings: ['Consider specifying analysis goal for better recommendation'],
+      warnings: ['Specify an analysis goal for a more specific recommendation'],
     });
   }
 
-  // Sort by score descending
-  return recommendations.sort((a, b) => b.score - a.score);
+  // Highest score first; ties broken by type name so ordering is deterministic
+  // (Array.prototype.sort is not stable across every engine for equal keys).
+  return recommendations.sort((a, b) => b.score - a.score || a.type.localeCompare(b.type));
 }
 
-export function getChartTypeLimitations(type: string): string[] {
-  const limitations: Record<string, string[]> = {
+export function getChartTypeLimitations(type: ChartType): string[] {
+  const limitations: Record<ChartType, string[]> = {
     horizontal_bar: [
-      'Limited to ~20 categories for readability',
-      'Value comparison less intuitive than vertical for some users',
+      'Limited to roughly 20 categories before becoming hard to scan',
+      'Magnitude comparison is less immediate than vertical bars for some readers',
     ],
     vertical_bar: [
-      'Category labels may truncate if long (>15 chars)',
-      'Limited to ~12 categories for readability',
+      'Category labels may truncate beyond about 15 characters',
+      'Limited to roughly 12 categories before becoming hard to scan',
     ],
     line: [
-      'Implies temporal continuity - may mislead if x-axis is categorical',
-      'Requires ordered x-axis (temporal or ordinal)',
-      'Zero baseline may be misleading if not explicitly shown',
+      'Implies continuity between points — misleading if the x-axis is unordered',
+      'Requires an ordered x-axis (temporal or ordinal)',
+      'A non-zero baseline exaggerates change unless clearly disclosed',
     ],
   };
-  return limitations[type] || [];
+  return limitations[type];
 }
 
-export function validateChartSpec(dataset: Dataset, spec: any): { valid: boolean; errors: string[] } {
+/**
+ * Structural validation of a chart spec against its dataset.
+ *
+ * Checks referential integrity and type compatibility — the things a wrong spec
+ * would otherwise fail on silently at render time, producing an empty chart.
+ */
+export function validateChartSpec(
+  dataset: Dataset,
+  spec: ChartSpec
+): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  if (!spec.xAxis || !spec.yAxis) {
-    errors.push('Both xAxis and yAxis are required');
+  if (spec.datasetId !== dataset.id) {
+    errors.push(`Spec references dataset ${spec.datasetId} but was validated against ${dataset.id}`);
   }
 
-  if (!spec.series || spec.series.length === 0) {
+  if (spec.series.length === 0) {
     errors.push('At least one series is required');
   }
 
-  // Check referenced columns exist
-  for (const series of spec.series || []) {
-    const col = dataset.columns.find(c => c.id === series.dataColumnId);
-    if (!col) {
-      errors.push(`Series references unknown column: ${series.dataColumnId}`);
+  for (const series of spec.series) {
+    const col = dataset.columns.find((c) => c.id === series.dataColumnId);
+    if (col === undefined) {
+      errors.push(`Series "${series.name}" references unknown column ${series.dataColumnId}`);
+      continue;
+    }
+    // Every supported chart type plots magnitude, so a series column must be numeric.
+    if (col.type !== 'number') {
+      errors.push(`Series "${series.name}" uses column "${col.name}" of type ${col.type}; a numeric column is required`);
     }
   }
 
-  // Check axis types match column types
-  if (spec.xAxis && spec.yAxis) {
-    const xCol = dataset.columns.find(c => c.id === spec.series?.[0]?.dataColumnId);
-    const yCol = dataset.columns.find(c => c.id === spec.series?.[0]?.dataColumnId);
+  if (spec.xAxis.type === 'time' && !dataset.columns.some((c) => c.type === 'date')) {
+    errors.push('X-axis is declared as time but the dataset has no date column');
+  }
 
-    // Simplified check - real implementation would be more thorough
+  if (spec.xAxis.type === 'category' && !dataset.columns.some((c) => c.type === 'string' || c.type === 'date')) {
+    errors.push('X-axis is declared as category but the dataset has no categorical column');
   }
 
   return { valid: errors.length === 0, errors };

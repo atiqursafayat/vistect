@@ -43,10 +43,11 @@ export function createMockPage(overrides: Partial<Page> = {}): Page {
 }
 
 export function createMockObject(overrides: Partial<DocumentObject> = {}): DocumentObject {
-  return {
+  const base = {
     id: 'obj_test123' as any,
-    role: 'paragraph',
-    kind: 'text',
+    role: 'paragraph' as const,
+    kind: 'text' as const,
+    content: '',
     purpose: 'Test paragraph',
     bounds: { x: 50, y: 50, w: 400, h: 100 },
     constraints: [],
@@ -58,17 +59,19 @@ export function createMockObject(overrides: Partial<DocumentObject> = {}): Docum
       warnings: [],
     },
     provenance: {
-      sourceType: 'user',
+      sourceType: 'user' as const,
       actorId: 'act_test123' as any,
       at: new Date().toISOString(),
     },
-    approval: 'unreviewed',
+    approval: 'unreviewed' as const,
     createdBy: 'act_test123' as any,
     versionCreated: 1,
     versionModified: 1,
     ...overrides,
   };
+  return base as DocumentObject;
 }
+
 
 export function createMockProject(overrides: Partial<DocumentProject> = {}): DocumentProject {
   const actor = createMockActor();
@@ -139,10 +142,10 @@ export function createMockModelContext(): MockModelContext {
     getTools() {
       return Array.from(tools.values()).map(({ tool }) => tool);
     },
-    async executeTool(name: string, _input: string) {
+    executeTool(name: string, _input: string) {
       const entry = tools.get(name);
       if (!entry) throw new Error(`Tool ${name} not found`);
-      return JSON.stringify({ content: [{ type: 'text', text: 'ok' }] });
+      return Promise.resolve(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }));
     },
     ontoolchange: null,
   };
