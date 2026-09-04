@@ -1,188 +1,261 @@
 // ============================================================================
 // IndexedDB Event Store
 // ============================================================================
+//
+// Durable, append-only event log plus snapshots, assets and per-project metadata
+// (ADR-006). Four object stores share one database so that a delete spanning all
+// of them is a single transaction.
+//
+// Two ordering concepts, deliberately distinct:
+//   `version`  — domain version, assigned by the command bus
+//   `sequence` — monotonic per-project storage order, assigned here
+//
+// Replay uses `sequence`, because two events can share a version (a command that
+// emits several events) while storage order must remain total.
 
-import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import { nanoid } from 'nanoid';
 import type {
+  ActorId,
   DocumentProject,
   DomainEvent,
-  EventEnvelope,
+  Hash,
   ProjectId,
   VersionId,
-  Hash,
-  ActorId,
 } from '@vistect/domain';
-import { computeHmac } from './hmac';
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { nanoid } from 'nanoid';
 
-// ============================================================================
-// Database Schema
-// ============================================================================
+
+import { CHAIN_ROOT, computeHmac, verifyChain, type ChainVerification } from './hmac';
+
+/** A `DomainEvent` as persisted: storage keys plus a chain HMAC. */
+export interface StoredEvent {
+  event: DomainEvent;
+  id: string;
+  projectId: ProjectId;
+  sequence: number;
+  hmac: string;
+}
+
+export interface StoredSnapshot {
+  id: VersionId;
+  projectId: ProjectId;
+  version: number;
+  snapshotHash: Hash;
+  eventCount: number;
+  projectState: DocumentProject;
+  prevSnapshotHash: Hash | null;
+  createdAt: string;
+}
+
+export interface StoredAsset {
+  id: string;
+  projectId: ProjectId;
+  blob: Blob;
+  mimeType: string;
+  contentHash: Hash;
+  createdAt: string;
+}
+
+export interface LogEntry {
+  timestamp: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  meta?: unknown;
+}
+
+export interface ProjectMeta {
+  id: string;
+  projectId: ProjectId;
+  actorId: ActorId;
+  /** HMAC secret for this session. Never leaves the device. */
+  sessionSecret: string;
+  log: LogEntry[];
+  storageEstimate: { usage: number; quota: number } | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface VistectDBSchema extends DBSchema {
   'vistect-events': {
-    key: string; // eventId
-    value: EventEnvelope & { projectId: ProjectId; sequence: number };
+    key: string;
+    value: StoredEvent;
     indexes: { 'by-project': ProjectId; 'by-project-sequence': [ProjectId, number] };
   };
   'vistect-snapshots': {
-    key: string; // snapshotId
-    value: {
-      id: VersionId;
-      projectId: ProjectId;
-      version: number;
-      snapshotHash: Hash;
-      eventCount: number;
-      projectState: DocumentProject;
-      prevSnapshotHash: Hash | null;
-      createdAt: string;
-    };
+    key: string;
+    value: StoredSnapshot;
     indexes: { 'by-project': ProjectId; 'by-project-version': [ProjectId, number] };
   };
   'vistect-assets': {
-    key: string; // assetId
-    value: {
-      id: string;
-      projectId: ProjectId;
-      blob: Blob;
-      mimeType: string;
-      contentHash: Hash;
-      createdAt: string;
-    };
+    key: string;
+    value: StoredAsset;
     indexes: { 'by-project': ProjectId; 'by-hash': Hash };
   };
   'vistect-meta': {
     key: string;
-    value: {
-      id: string;
-      projectId: ProjectId;
-      actorId: ActorId;
-      sessionSecret: string; // HMAC secret for this session
-      log: Array<{ timestamp: string; level: string; message: string; meta?: unknown }>;
-      storageEstimate: { usage: number; quota: number } | null;
-      createdAt: string;
-      updatedAt: string;
-    };
+    value: ProjectMeta;
     indexes: { 'by-project': ProjectId };
-  }
+  };
 }
 
 const DB_NAME = 'vistect-db';
 const DB_VERSION = 1;
 
-// ============================================================================
-// Event Store Class
-// ============================================================================
+/** Log ring-buffer size per project. */
+const MAX_LOG_ENTRIES = 1_000;
 
 export class EventStore {
   private db: IDBPDatabase<VistectDBSchema> | null = null;
-  private initPromise: Promise<void> | null = null;
+  private initPromise: Promise<IDBPDatabase<VistectDBSchema>> | null = null;
 
-  async initialize(): Promise<void> {
-    if (this.db) return;
-    if (this.initPromise) return this.initPromise;
-
-    this.initPromise = this._initialize();
-    await this.initPromise;
+  /**
+   * Opens the database, returning the handle.
+   *
+   * Concurrent callers share one in-flight promise, so a burst of operations at
+   * startup cannot trigger several parallel `openDB` calls.
+   */
+  async initialize(): Promise<IDBPDatabase<VistectDBSchema>> {
+    if (this.db !== null) return this.db;
+    this.initPromise ??= this.open();
+    this.db = await this.initPromise;
+    return this.db;
   }
 
-  private async _initialize(): Promise<void> {
-    this.db = await openDB<VistectDBSchema>(DB_NAME, DB_VERSION, {
+  private async open(): Promise<IDBPDatabase<VistectDBSchema>> {
+    return openDB<VistectDBSchema>(DB_NAME, DB_VERSION, {
       upgrade(db) {
-        // Events store
         if (!db.objectStoreNames.contains('vistect-events')) {
-          const eventsStore = db.createObjectStore('vistect-events', { keyPath: 'id' });
-          eventsStore.createIndex('by-project', 'projectId');
-          eventsStore.createIndex('by-project-sequence', ['projectId', 'sequence']);
+          const events = db.createObjectStore('vistect-events', { keyPath: 'id' });
+          events.createIndex('by-project', 'projectId');
+          events.createIndex('by-project-sequence', ['projectId', 'sequence']);
         }
-
-        // Snapshots store
         if (!db.objectStoreNames.contains('vistect-snapshots')) {
-          const snapshotsStore = db.createObjectStore('vistect-snapshots', { keyPath: 'id' });
-          snapshotsStore.createIndex('by-project', 'projectId');
-          snapshotsStore.createIndex('by-project-version', ['projectId', 'version']);
+          const snapshots = db.createObjectStore('vistect-snapshots', { keyPath: 'id' });
+          snapshots.createIndex('by-project', 'projectId');
+          snapshots.createIndex('by-project-version', ['projectId', 'version']);
         }
-
-        // Assets store
         if (!db.objectStoreNames.contains('vistect-assets')) {
-          const assetsStore = db.createObjectStore('vistect-assets', { keyPath: 'id' });
-          assetsStore.createIndex('by-project', 'projectId');
-          assetsStore.createIndex('by-hash', 'contentHash', { unique: false });
+          const assets = db.createObjectStore('vistect-assets', { keyPath: 'id' });
+          assets.createIndex('by-project', 'projectId');
+          assets.createIndex('by-hash', 'contentHash');
         }
-
-        // Meta store
         if (!db.objectStoreNames.contains('vistect-meta')) {
-          const metaStore = db.createObjectStore('vistect-meta', { keyPath: 'id' });
-          metaStore.createIndex('by-project', 'projectId');
+          const meta = db.createObjectStore('vistect-meta', { keyPath: 'id' });
+          meta.createIndex('by-project', 'projectId');
         }
       },
     });
   }
 
-  // ============================================================================
-  // Event Operations
-  // ============================================================================
+  // ==========================================================================
+  // Events
+  // ==========================================================================
 
-  async appendEvents(projectId: ProjectId, events: DomainEvent[], sessionSecret: string): Promise<void> {
-    if (!this.db) await this.initialize();
+  /**
+   * Appends events atomically, extending the HMAC chain.
+   *
+   * HMACs are computed **before** the transaction opens: `crypto.subtle` is async
+   * and awaiting inside an IndexedDB transaction lets it auto-commit, which would
+   * silently drop the remaining events (I-13).
+   */
+  async appendEvents(
+    projectId: ProjectId,
+    events: DomainEvent[],
+    sessionSecret: string
+  ): Promise<void> {
+    if (events.length === 0) return;
+    const db = await this.initialize();
 
-    const tx = this.db!.transaction('vistect-events', 'readwrite');
-    const store = tx.objectStore('vistect-events');
+    const last = await this.getLatestEvent(projectId);
+    let sequence = last === null ? 0 : last.sequence + 1;
+    let previousHmac = last?.hmac ?? CHAIN_ROOT;
 
-    // Get current sequence number for this project
-    const lastEvent = await store.index('by-project').getAll(projectId);
-    let sequence = lastEvent.length > 0 ? Math.max(...lastEvent.map(e => e.sequence)) + 1 : 0;
-
+    const records: StoredEvent[] = [];
     for (const event of events) {
-      const envelope: EventEnvelope & { projectId: ProjectId; sequence: number } = {
-        ...event,
-        projectId,
-        sequence: sequence++,
-        hmac: computeHmac(event, sessionSecret),
-      };
-      await store.put(envelope);
+      const hmac = await computeHmac(event, sessionSecret, previousHmac);
+      records.push({ event, id: event.id, projectId, sequence, hmac });
+      previousHmac = hmac;
+      sequence++;
     }
 
+    const tx = db.transaction('vistect-events', 'readwrite');
+    const store = tx.objectStore('vistect-events');
+    await Promise.all(records.map((record) => store.put(record)));
     await tx.done;
   }
 
-  async getEvents(projectId: ProjectId, fromSequence?: number, toSequence?: number): Promise<EventEnvelope[]> {
-    if (!this.db) await this.initialize();
+  /** Stored events in sequence order, optionally bounded by sequence. */
+  async getEvents(
+    projectId: ProjectId,
+    fromSequence?: number,
+    toSequence?: number
+  ): Promise<StoredEvent[]> {
+    const db = await this.initialize();
+    const index = db
+      .transaction('vistect-events', 'readonly')
+      .objectStore('vistect-events')
+      .index('by-project-sequence');
 
-    const store = this.db!.transaction('vistect-events', 'readonly').objectStore('vistect-events');
-    const index = store.index('by-project');
+    // The compound index is queried with compound bounds; the previous code
+    // passed compound ranges to the single-key `by-project` index, which matches
+    // nothing.
+    const lower = fromSequence ?? 0;
+    const upper = toSequence ?? Number.MAX_SAFE_INTEGER;
+    const range = IDBKeyRange.bound([projectId, lower], [projectId, upper]);
 
-    let events: EventEnvelope[];
-    if (fromSequence !== undefined && toSequence !== undefined) {
-      events = await index.getAll(IDBKeyRange.bound([projectId, fromSequence], [projectId, toSequence]));
-    } else if (fromSequence !== undefined) {
-      events = await index.getAll(IDBKeyRange.lowerBound([projectId, fromSequence]));
-    } else {
-      events = await index.getAll(projectId);
-    }
-
-    return events.sort((a, b) => a.sequence - b.sequence);
+    // Index order is already (projectId, sequence), so results arrive sorted.
+    return index.getAll(range);
   }
 
-  async getLatestEvent(projectId: ProjectId): Promise<EventEnvelope | null> {
-    if (!this.db) await this.initialize();
+  /** Domain events in replay order. */
+  async getDomainEvents(
+    projectId: ProjectId,
+    fromSequence?: number,
+    toSequence?: number
+  ): Promise<DomainEvent[]> {
+    const stored = await this.getEvents(projectId, fromSequence, toSequence);
+    return stored.map((record) => record.event);
+  }
 
-    const store = this.db!.transaction('vistect-events', 'readonly').objectStore('vistect-events');
-    const index = store.index('by-project');
-    const events = await index.getAll(projectId);
-    if (events.length === 0) return null;
-    return events.reduce((latest, e) => e.sequence > latest.sequence ? e : latest);
+  async getLatestEvent(projectId: ProjectId): Promise<StoredEvent | null> {
+    const db = await this.initialize();
+    const index = db
+      .transaction('vistect-events', 'readonly')
+      .objectStore('vistect-events')
+      .index('by-project-sequence');
+
+    // Reverse cursor reads one record instead of loading the whole log.
+    const cursor = await index.openCursor(
+      IDBKeyRange.bound([projectId, 0], [projectId, Number.MAX_SAFE_INTEGER]),
+      'prev'
+    );
+    return cursor?.value ?? null;
   }
 
   async getEventCount(projectId: ProjectId): Promise<number> {
-    if (!this.db) await this.initialize();
-    const store = this.db!.transaction('vistect-events', 'readonly').objectStore('vistect-events');
-    return store.index('by-project').count(projectId);
+    const db = await this.initialize();
+    return db
+      .transaction('vistect-events', 'readonly')
+      .objectStore('vistect-events')
+      .index('by-project')
+      .count(projectId);
   }
 
-  // ============================================================================
-  // Snapshot Operations
-  // ============================================================================
+  /** Verifies the whole HMAC chain, reporting the first broken link. */
+  async verifyEventChain(
+    projectId: ProjectId,
+    sessionSecret: string
+  ): Promise<ChainVerification> {
+    const stored = await this.getEvents(projectId);
+    return verifyChain(
+      stored.map((record) => ({ event: record.event, hmac: record.hmac })),
+      sessionSecret
+    );
+  }
+
+  // ==========================================================================
+  // Snapshots
+  // ==========================================================================
 
   async createSnapshot(
     projectId: ProjectId,
@@ -192,13 +265,11 @@ export class EventStore {
     projectState: DocumentProject,
     prevSnapshotHash: Hash | null
   ): Promise<VersionId> {
-    if (!this.db) await this.initialize();
-
+    const db = await this.initialize();
     const snapshotId = `ver_${nanoid(12)}` as VersionId;
-    const tx = this.db!.transaction('vistect-snapshots', 'readwrite');
-    const store = tx.objectStore('vistect-snapshots');
 
-    await store.put({
+    const tx = db.transaction('vistect-snapshots', 'readwrite');
+    await tx.objectStore('vistect-snapshots').put({
       id: snapshotId,
       projectId,
       version,
@@ -208,71 +279,59 @@ export class EventStore {
       prevSnapshotHash,
       createdAt: new Date().toISOString(),
     });
-
     await tx.done;
+
     return snapshotId;
   }
 
-  async getSnapshot(projectId: ProjectId, version: number): Promise<{
-    id: VersionId;
-    projectId: ProjectId;
-    version: number;
-    snapshotHash: Hash;
-    eventCount: number;
-    projectState: DocumentProject;
-    prevSnapshotHash: Hash | null;
-    createdAt: string;
-  } | null> {
-    if (!this.db) await this.initialize();
-
-    const store = this.db!.transaction('vistect-snapshots', 'readonly').objectStore('vistect-snapshots');
-    const index = store.index('by-project-version');
-    return index.get([projectId, version]);
+  async getSnapshot(projectId: ProjectId, version: number): Promise<StoredSnapshot | null> {
+    const db = await this.initialize();
+    const found = await db
+      .transaction('vistect-snapshots', 'readonly')
+      .objectStore('vistect-snapshots')
+      .index('by-project-version')
+      .get([projectId, version]);
+    return found ?? null;
   }
 
-  async getLatestSnapshot(projectId: ProjectId): Promise<{
-    id: VersionId;
-    projectId: ProjectId;
-    version: number;
-    snapshotHash: Hash;
-    eventCount: number;
-    projectState: DocumentProject;
-    prevSnapshotHash: Hash | null;
-    createdAt: string;
-  } | null> {
-    if (!this.db) await this.initialize();
-
-    const store = this.db!.transaction('vistect-snapshots', 'readonly').objectStore('vistect-snapshots');
-    const index = store.index('by-project');
-    const snapshots = await index.getAll(projectId);
-    if (snapshots.length === 0) return null;
-    return snapshots.reduce((latest, s) => s.version > latest.version ? s : latest);
+  async getLatestSnapshot(projectId: ProjectId): Promise<StoredSnapshot | null> {
+    const db = await this.initialize();
+    const cursor = await db
+      .transaction('vistect-snapshots', 'readonly')
+      .objectStore('vistect-snapshots')
+      .index('by-project-version')
+      .openCursor(IDBKeyRange.bound([projectId, 0], [projectId, Number.MAX_SAFE_INTEGER]), 'prev');
+    return cursor?.value ?? null;
   }
 
-  async getSnapshotChain(projectId: ProjectId): Promise<Array<{
-    id: VersionId;
-    version: number;
-    snapshotHash: Hash;
-    prevSnapshotHash: Hash | null;
-  }>> {
-    if (!this.db) await this.initialize();
+  async getSnapshotChain(projectId: ProjectId): Promise<
+    { id: VersionId; version: number; snapshotHash: Hash; prevSnapshotHash: Hash | null }[]
+  > {
+    const db = await this.initialize();
+    const snapshots = await db
+      .transaction('vistect-snapshots', 'readonly')
+      .objectStore('vistect-snapshots')
+      .index('by-project-version')
+      .getAll(IDBKeyRange.bound([projectId, 0], [projectId, Number.MAX_SAFE_INTEGER]));
 
-    const store = this.db!.transaction('vistect-snapshots', 'readonly').objectStore('vistect-snapshots');
-    const index = store.index('by-project');
-    const snapshots = await index.getAll(projectId);
-    return snapshots
-      .sort((a, b) => a.version - b.version)
-      .map(s => ({
-        id: s.id,
-        version: s.version,
-        snapshotHash: s.snapshotHash,
-        prevSnapshotHash: s.prevSnapshotHash,
-      }));
+    return snapshots.map((s) => ({
+      id: s.id,
+      version: s.version,
+      snapshotHash: s.snapshotHash,
+      prevSnapshotHash: s.prevSnapshotHash,
+    }));
   }
 
-  // ============================================================================
-  // Asset Operations
-  // ============================================================================
+  async deleteSnapshot(snapshotId: VersionId): Promise<void> {
+    const db = await this.initialize();
+    const tx = db.transaction('vistect-snapshots', 'readwrite');
+    await tx.objectStore('vistect-snapshots').delete(snapshotId);
+    await tx.done;
+  }
+
+  // ==========================================================================
+  // Assets
+  // ==========================================================================
 
   async storeAsset(
     projectId: ProjectId,
@@ -281,12 +340,9 @@ export class EventStore {
     mimeType: string,
     contentHash: Hash
   ): Promise<void> {
-    if (!this.db) await this.initialize();
-
-    const tx = this.db!.transaction('vistect-assets', 'readwrite');
-    const store = tx.objectStore('vistect-assets');
-
-    await store.put({
+    const db = await this.initialize();
+    const tx = db.transaction('vistect-assets', 'readwrite');
+    await tx.objectStore('vistect-assets').put({
       id: assetId,
       projectId,
       blob,
@@ -294,207 +350,172 @@ export class EventStore {
       contentHash,
       createdAt: new Date().toISOString(),
     });
-
     await tx.done;
   }
 
-  async getAsset(assetId: string): Promise<{
-    id: string;
-    projectId: ProjectId;
-    blob: Blob;
-    mimeType: string;
-    contentHash: Hash;
-    createdAt: string;
-  } | null> {
-    if (!this.db) await this.initialize();
-
-    const store = this.db!.transaction('vistect-assets', 'readonly').objectStore('vistect-assets');
-    return store.get(assetId);
+  async getAsset(assetId: string): Promise<StoredAsset | null> {
+    const db = await this.initialize();
+    const found = await db
+      .transaction('vistect-assets', 'readonly')
+      .objectStore('vistect-assets')
+      .get(assetId);
+    return found ?? null;
   }
 
-  async getAssetsByProject(projectId: ProjectId): Promise<Array<{
-    id: string;
-    projectId: ProjectId;
-    blob: Blob;
-    mimeType: string;
-    contentHash: Hash;
-    createdAt: string;
-  }>> {
-    if (!this.db) await this.initialize();
-
-    const store = this.db!.transaction('vistect-assets', 'readonly').objectStore('vistect-assets');
-    return store.index('by-project').getAll(projectId);
+  async getAssetsByProject(projectId: ProjectId): Promise<StoredAsset[]> {
+    const db = await this.initialize();
+    return db
+      .transaction('vistect-assets', 'readonly')
+      .objectStore('vistect-assets')
+      .index('by-project')
+      .getAll(projectId);
   }
 
-  async getAssetByHash(contentHash: Hash): Promise<{
-    id: string;
-    projectId: ProjectId;
-    blob: Blob;
-    mimeType: string;
-    contentHash: Hash;
-    createdAt: string;
-  } | null> {
-    if (!this.db) await this.initialize();
-
-    const store = this.db!.transaction('vistect-assets', 'readonly').objectStore('vistect-assets');
-    const assets = await store.index('by-hash').getAll(contentHash);
-    return assets[0] || null;
+  /** Finds an asset by content hash. Enables upload deduplication (F-2.1). */
+  async getAssetByHash(contentHash: Hash): Promise<StoredAsset | null> {
+    const db = await this.initialize();
+    const found = await db
+      .transaction('vistect-assets', 'readonly')
+      .objectStore('vistect-assets')
+      .index('by-hash')
+      .get(contentHash);
+    return found ?? null;
   }
 
   async deleteAsset(assetId: string): Promise<void> {
-    if (!this.db) await this.initialize();
-    const tx = this.db!.transaction('vistect-assets', 'readwrite');
+    const db = await this.initialize();
+    const tx = db.transaction('vistect-assets', 'readwrite');
     await tx.objectStore('vistect-assets').delete(assetId);
     await tx.done;
   }
 
-  // ============================================================================
-  // Meta Operations
-  // ============================================================================
+  // ==========================================================================
+  // Metadata
+  // ==========================================================================
+
+  private static metaKey(projectId: ProjectId): string {
+    return `meta_${projectId}`;
+  }
 
   async createProjectMeta(
     projectId: ProjectId,
     actorId: ActorId,
     sessionSecret: string
   ): Promise<void> {
-    if (!this.db) await this.initialize();
+    const db = await this.initialize();
+    const now = new Date().toISOString();
 
-    const tx = this.db!.transaction('vistect-meta', 'readwrite');
-    const store = tx.objectStore('vistect-meta');
-
-    await store.put({
-      id: `meta_${projectId}`,
+    const tx = db.transaction('vistect-meta', 'readwrite');
+    await tx.objectStore('vistect-meta').put({
+      id: EventStore.metaKey(projectId),
       projectId,
       actorId,
       sessionSecret,
       log: [],
       storageEstimate: null,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await tx.done;
+  }
+
+  async getProjectMeta(projectId: ProjectId): Promise<ProjectMeta | null> {
+    const db = await this.initialize();
+    const found = await db
+      .transaction('vistect-meta', 'readonly')
+      .objectStore('vistect-meta')
+      .get(EventStore.metaKey(projectId));
+    return found ?? null;
+  }
+
+  async updateProjectMeta(
+    projectId: ProjectId,
+    updates: Partial<Pick<ProjectMeta, 'actorId' | 'sessionSecret' | 'log' | 'storageEstimate'>>
+  ): Promise<void> {
+    const db = await this.initialize();
+    const tx = db.transaction('vistect-meta', 'readwrite');
+    const store = tx.objectStore('vistect-meta');
+
+    const existing = await store.get(EventStore.metaKey(projectId));
+    if (existing === undefined) {
+      await tx.done;
+      throw new Error(`No metadata for project ${projectId}`);
+    }
+
+    await store.put({ ...existing, ...updates, updatedAt: new Date().toISOString() });
+    await tx.done;
+  }
+
+  async addLogEntry(projectId: ProjectId, entry: LogEntry): Promise<void> {
+    const db = await this.initialize();
+    const tx = db.transaction('vistect-meta', 'readwrite');
+    const store = tx.objectStore('vistect-meta');
+
+    const existing = await store.get(EventStore.metaKey(projectId));
+    // Logging is best-effort: a missing meta record must not fail the operation
+    // that produced the log line.
+    if (existing === undefined) {
+      await tx.done;
+      return;
+    }
+
+    await store.put({
+      ...existing,
+      log: [...existing.log, entry].slice(-MAX_LOG_ENTRIES),
       updatedAt: new Date().toISOString(),
     });
-
     await tx.done;
   }
 
-  async getProjectMeta(projectId: ProjectId): Promise<{
-    id: string;
-    projectId: ProjectId;
-    actorId: ActorId;
-    sessionSecret: string;
-    log: Array<{ timestamp: string; level: string; message: string; meta?: unknown }>;
-    storageEstimate: { usage: number; quota: number } | null;
-    createdAt: string;
-    updatedAt: string;
-  } | null> {
-    if (!this.db) await this.initialize();
+  // ==========================================================================
+  // Project lifecycle
+  // ==========================================================================
 
-    const store = this.db!.transaction('vistect-meta', 'readonly').objectStore('vistect-meta');
-    return store.get(`meta_${projectId}`);
-  }
-
-  async updateProjectMeta(projectId: ProjectId, updates: Partial<{
-    actorId: ActorId;
-    sessionSecret: string;
-    log: Array<{ timestamp: string; level: string; message: string; meta?: unknown }>;
-    storageEstimate: { usage: number; quota: number } | null;
-  }>): Promise<void> {
-    if (!this.db) await this.initialize();
-
-    const tx = this.db!.transaction('vistect-meta', 'readwrite');
-    const store = tx.objectStore('vistect-meta');
-
-    const existing = await store.get(`meta_${projectId}`);
-    if (existing) {
-      await store.put({
-        ...existing,
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-
-    await tx.done;
-  }
-
-  async addLogEntry(projectId: ProjectId, entry: { timestamp: string; level: string; message: string; meta?: unknown }): Promise<void> {
-    if (!this.db) await this.initialize();
-
-    const tx = this.db!.transaction('vistect-meta', 'readwrite');
-    const store = tx.objectStore('vistect-meta');
-
-    const existing = await store.get(`meta_${projectId}`);
-    if (existing) {
-      const log = [...existing.log, entry].slice(-1000); // Ring buffer of 1000 entries
-      await store.put({ ...existing, log, updatedAt: new Date().toISOString() });
-    }
-
-    await tx.done;
-  }
-
-  // ============================================================================
-  // Project Operations
-  // ============================================================================
-
-  async saveProject(project: DocumentProject): Promise<void> {
-    // Project is saved via event store + snapshots
-    // This is a no-op here - the command bus handles project persistence
-  }
-
-  async loadProject(projectId: ProjectId): Promise<DocumentProject | null> {
-    // Load from latest snapshot + replay events
-    const snapshot = await this.getLatestSnapshot(projectId);
-    if (!snapshot) return null;
-
-    const events = await this.getEvents(projectId, snapshot.version);
-    // In a real implementation, we'd replay events onto the snapshot
-    // For now, return the snapshot state
-    return snapshot.projectState;
-  }
-
+  /**
+   * Deletes every trace of a project across all four stores in one transaction,
+   * so a partial delete cannot leave orphaned events or assets (§22).
+   */
   async deleteProject(projectId: ProjectId): Promise<void> {
-    if (!this.db) await this.initialize();
+    const db = await this.initialize();
+    const tx = db.transaction(
+      ['vistect-events', 'vistect-snapshots', 'vistect-assets', 'vistect-meta'],
+      'readwrite'
+    );
 
-    const tx = this.db!.transaction(['vistect-events', 'vistect-snapshots', 'vistect-assets', 'vistect-meta'], 'readwrite');
-
-    // Delete events
-    const eventsStore = tx.objectStore('vistect-events');
-    const eventsIndex = eventsStore.index('by-project');
-    const events = await eventsIndex.getAllKeys(projectId);
-    for (const key of events) {
-      await eventsStore.delete(key);
+    const events = tx.objectStore('vistect-events');
+    for (const key of await events.index('by-project').getAllKeys(projectId)) {
+      await events.delete(key);
     }
 
-    // Delete snapshots
-    const snapshotsStore = tx.objectStore('vistect-snapshots');
-    const snapshotsIndex = snapshotsStore.index('by-project');
-    const snapshots = await snapshotsIndex.getAllKeys(projectId);
-    for (const key of snapshots) {
-      await snapshotsStore.delete(key);
+    const snapshots = tx.objectStore('vistect-snapshots');
+    for (const key of await snapshots.index('by-project').getAllKeys(projectId)) {
+      await snapshots.delete(key);
     }
 
-    // Delete assets
-    const assetsStore = tx.objectStore('vistect-assets');
-    const assetsIndex = assetsStore.index('by-project');
-    const assets = await assetsIndex.getAllKeys(projectId);
-    for (const key of assets) {
-      await assetsStore.delete(key);
+    const assets = tx.objectStore('vistect-assets');
+    for (const key of await assets.index('by-project').getAllKeys(projectId)) {
+      await assets.delete(key);
     }
 
-    // Delete meta
-    const metaStore = tx.objectStore('vistect-meta');
-    await metaStore.delete(`meta_${projectId}`);
-
+    await tx.objectStore('vistect-meta').delete(EventStore.metaKey(projectId));
     await tx.done;
   }
 
-  // ============================================================================
-  // Utility
-  // ============================================================================
+  /** Project ids that have at least one snapshot. */
+  async listProjectIds(): Promise<ProjectId[]> {
+    const db = await this.initialize();
+    const snapshots = await db
+      .transaction('vistect-snapshots', 'readonly')
+      .objectStore('vistect-snapshots')
+      .getAll();
+    return [...new Set(snapshots.map((s) => s.projectId))];
+  }
 
-  async close(): Promise<void> {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
+  /** Closes the connection. Synchronous: `IDBDatabase.close` returns immediately. */
+  close(): void {
+    this.db?.close();
+    this.db = null;
+    this.initPromise = null;
   }
 
   isInitialized(): boolean {
@@ -502,8 +523,5 @@ export class EventStore {
   }
 }
 
-// ============================================================================
-// Singleton Instance
-// ============================================================================
-
+/** Shared instance. One IndexedDB connection per tab is sufficient. */
 export const eventStore = new EventStore();

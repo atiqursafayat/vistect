@@ -2,6 +2,7 @@
 // State Machines - Exhaustive Pure Functions
 // ============================================================================
 
+import { dictEntries, dictValues, type Dict } from '../collections';
 import type {
   DocumentStatus,
   PageStatus,
@@ -9,11 +10,8 @@ import type {
   VisualDecision,
   ValidationFinding,
   FindingStatus,
-  Actor,
   ActorKind,
 } from '../schema';
-
-import type { DomainEvent } from '../events';
 
 // ============================================================================
 // Document Lifecycle (spec §27)
@@ -69,7 +67,7 @@ export function applyDocumentTransition(
       // Hash check done in command bus
       break;
     case 'UnlockRequested':
-      if (guards.userGesture === false) throw new Error('Only human can unlock');
+      if (!guards.userGesture) throw new Error('Only human can unlock');
       break;
   }
 
@@ -265,100 +263,188 @@ export function applyExportTransition(
 // ============================================================================
 // Staleness Rules (cascade)
 // ============================================================================
+//
+// When an upstream entity changes, previously approved decisions and previously
+// resolved findings must be re-surfaced: an approval given against an older
+// version is no longer evidence about the current one (I-04 … I-08).
 
-export interface StalenessContext {
-  project: {
-    currentVersion: number;
-    decisions: Record<string, VisualDecision>;
-    findings: Record<string, ValidationFinding>;
-    objects: Record<string, { approval: ApprovalState; decisionId?: string }>;
-    diagrams: Record<string, { specVersion: number }>;
-    charts: Record<string, { specVersion: number }>;
-    datasets: Record<string, { id: string }>;
-  };
-  changedEntity: { type: 'object' | 'diagram' | 'chart' | 'dataset' | 'image_crop'; id: string; pageId?: string };
+/**
+ * Minimal object shape these rules need.
+ *
+ * The discriminating fields are optional so callers can pass either a real
+ * `DocumentObject` or a small test fixture. When they are absent, attribution
+ * falls back to document scope (see {@link objectIdsAffectedBy}).
+ */
+export interface StalenessObject {
+  approval: ApprovalState;
+  decisionId?: string;
+  kind?: string;
+  chartId?: string;
+  diagramId?: string;
+  assetId?: string;
 }
 
-export function computeStaleness(context: StalenessContext): {
+/** Minimal shape these rules need from a chart. */
+export interface StalenessChart {
+  id: string;
+  spec: { datasetId: string };
+}
+
+export interface StalenessProject {
+  currentVersion: number;
+  decisions: Dict<string, VisualDecision>;
+  findings: Dict<string, ValidationFinding>;
+  objects: Dict<string, StalenessObject>;
+  diagrams: Dict<string, { id: string }>;
+  charts: Dict<string, StalenessChart>;
+  datasets: Dict<string, { id: string }>;
+}
+
+export type ChangedEntityType = 'object' | 'diagram' | 'chart' | 'dataset' | 'image_crop';
+
+export interface StalenessContext {
+  project: StalenessProject;
+  changedEntity: { type: ChangedEntityType; id: string; pageId?: string };
+}
+
+export interface StalenessResult {
   decisionsToStale: string[];
   findingsToReopen: string[];
   objectsToStale: string[];
-} {
-  const { project, changedEntity } = context;
-  const decisionsToStale: string[] = [];
-  const findingsToReopen: string[] = [];
-  const objectsToStale: string[] = [];
+}
 
-  // I-04: Mutation of approved object marks it stale and re-opens its decision
+/** Decision categories invalidated by a change to each entity type. */
+const AFFECTED_CATEGORIES: Readonly<Record<ChangedEntityType, readonly string[]>> = {
+  // Object mutations are handled by the I-04 rule below, which walks the
+  // object's own decision rather than matching on category.
+  object: [],
+  dataset: ['chart_type', 'chart_styling'],
+  chart: ['chart_type', 'chart_styling'],
+  diagram: ['diagram_structure', 'diagram_layout'],
+  image_crop: ['alt_text', 'image_placement'],
+};
+
+export function computeStaleness(context: StalenessContext): StalenessResult {
+  const { project, changedEntity } = context;
+  const decisionsToStale = new Set<string>();
+  const objectsToStale = new Set<string>();
+
+  // I-04: mutating an approved object stales it and its decision.
   if (changedEntity.type === 'object') {
     const obj = project.objects[changedEntity.id];
-    if (obj && obj.approval === 'approved' && obj.decisionId) {
+    if (obj?.approval === 'approved' && obj.decisionId !== undefined) {
       const decision = project.decisions[obj.decisionId];
-      if (decision && decision.status === 'approved') {
-        decisionsToStale.push(obj.decisionId);
-        objectsToStale.push(changedEntity.id);
+      if (decision?.status === 'approved') {
+        decisionsToStale.add(obj.decisionId);
+        objectsToStale.add(changedEntity.id);
       }
     }
   }
 
-  // I-05: Page mutation unlocks page and cascades document status recompute
-  if (changedEntity.type === 'object' && changedEntity.pageId) {
-    // Page unlock handled in command handler
+  // I-06 / I-07 / I-08: category-scoped cascades.
+  const categories = AFFECTED_CATEGORIES[changedEntity.type];
+  if (categories.length > 0) {
+    const scopedObjectIds = objectIdsAffectedBy(project, changedEntity);
+
+    for (const [decisionId, decision] of dictEntries(project.decisions)) {
+      if (decision.status !== 'approved') continue;
+      if (!categories.includes(decision.category)) continue;
+
+      // When the change resolves to specific objects, only stale decisions that
+      // actually target them. A decision with no object targets is
+      // document-scoped and always affected.
+      const targetsChanged =
+        scopedObjectIds === null ||
+        decision.targetObjectIds.length === 0 ||
+        decision.targetObjectIds.some((id) => scopedObjectIds.has(String(id)));
+
+      if (targetsChanged) {
+        decisionsToStale.add(decisionId);
+      }
+    }
   }
 
-  // I-06: Dataset change marks dependent charts' checks/descriptions stale
-  if (changedEntity.type === 'dataset') {
-    for (const [chartId, chart] of Object.entries(project.charts)) {
-      // Check if chart uses this dataset (via spec)
-      // This is simplified - real check would look at chart.spec.datasetId
-      const decision = Object.values(project.decisions).find(d =>
-        d.category === 'chart_type' || d.category === 'chart_styling'
+  // Any upstream change re-opens findings that were closed against the old state:
+  // a "resolved" verdict is evidence about a version that no longer exists.
+  const findingsToReopen: string[] = [];
+  for (const [findingId, finding] of dictEntries(project.findings)) {
+    if (finding.status !== 'resolved' && finding.status !== 'accepted') continue;
+
+    const targetId = String(finding.targetId);
+    const targetObjectStaled = objectsToStale.has(targetId);
+    const targetIsChangedEntity = targetId === changedEntity.id;
+    const targetCoveredByStaledDecision = dictEntries(project.decisions).some(
+      ([decisionId, decision]) =>
+        decisionsToStale.has(decisionId) &&
+        (decision.targetObjectIds.some((id) => String(id) === targetId) ||
+          decision.targetPageIds.some((id) => String(id) === targetId))
+    );
+
+    if (targetObjectStaled || targetIsChangedEntity || targetCoveredByStaledDecision) {
+      findingsToReopen.push(findingId);
+    }
+  }
+
+  return {
+    decisionsToStale: [...decisionsToStale],
+    findingsToReopen,
+    objectsToStale: [...objectsToStale],
+  };
+}
+
+/**
+ * Object ids downstream of a change, or `null` when object-level attribution is
+ * unavailable and the cascade must fall back to document scope.
+ *
+ * Decisions target **object** ids, so a change to a chart, diagram or dataset
+ * has to be resolved forward to the objects that render it. Returning the
+ * chart/diagram/dataset id directly would never intersect
+ * `decision.targetObjectIds`, silently skipping every cascade.
+ *
+ * `null` (document scope) is returned when no rendering object can be found —
+ * for example a chart that exists but is not yet placed on a page. Widening is
+ * the safe direction: an unnecessary re-review costs the user a confirmation,
+ * whereas a missed one lets an approval stand against changed content.
+ */
+function objectIdsAffectedBy(
+  project: StalenessProject,
+  changedEntity: StalenessContext['changedEntity']
+): Set<string> | null {
+  switch (changedEntity.type) {
+    case 'object':
+      return new Set([changedEntity.id]);
+
+    case 'chart':
+      return objectIdsOrNull(project, (obj) => obj.chartId === changedEntity.id);
+
+    case 'diagram':
+      return objectIdsOrNull(project, (obj) => obj.diagramId === changedEntity.id);
+
+    case 'dataset': {
+      const chartIds = new Set(
+        dictValues(project.charts)
+          .filter((chart) => chart.spec.datasetId === changedEntity.id)
+          .map((chart) => chart.id)
       );
-      if (decision && decision.status === 'approved') {
-        decisionsToStale.push(decision.id);
-      }
-    }
-  }
-
-  // I-07: Diagram node/edge change marks diagram descriptions and checks stale
-  if (changedEntity.type === 'diagram') {
-    for (const [decisionId, decision] of Object.entries(project.decisions)) {
-      if ((decision.category === 'diagram_structure' || decision.category === 'diagram_layout') &&
-          decision.status === 'approved') {
-        decisionsToStale.push(decisionId);
-      }
-    }
-  }
-
-  // I-08: Image crop change marks alt text + placement decisions for review
-  if (changedEntity.type === 'image_crop') {
-    for (const [decisionId, decision] of Object.entries(project.decisions)) {
-      if ((decision.category === 'alt_text' || decision.category === 'image_placement') &&
-          decision.status === 'approved') {
-        // Check if crop intersects face/subject regions
-        // Simplified: assume it does
-        decisionsToStale.push(decisionId);
-      }
-    }
-  }
-
-  // Upstream change re-opens invalidated findings (I-04..I-08)
-  for (const [findingId, finding] of Object.entries(project.findings)) {
-    if (finding.status === 'resolved' || finding.status === 'accepted') {
-      const targetObj = project.objects[finding.targetId as string];
-      const targetDiag = project.diagrams[finding.targetId as string];
-      const targetChart = project.charts[finding.targetId as string];
-
-      let shouldReopen = false;
-      if (targetObj && targetObj.approval === 'stale') shouldReopen = true;
-      if (targetDiag && decisionsToStale.some(d => d.includes(targetDiag.id))) shouldReopen = true;
-      if (targetChart && decisionsToStale.some(d => d.includes(targetChart.id))) shouldReopen = true;
-
-      if (shouldReopen) {
-        findingsToReopen.push(findingId);
-      }
+      if (chartIds.size === 0) return null;
+      return objectIdsOrNull(project, (obj) =>
+        obj.chartId !== undefined && chartIds.has(obj.chartId)
+      );
     }
 
-    return { decisionsToStale, findingsToReopen, objectsToStale };
+    case 'image_crop':
+      // A crop identifies an asset; objects reference assets by `assetId`.
+      return objectIdsOrNull(project, (obj) => obj.assetId === changedEntity.id);
   }
+}
+
+/** Matching object ids, or `null` when nothing matches (document scope). */
+function objectIdsOrNull(
+  project: StalenessProject,
+  predicate: (obj: StalenessObject) => boolean
+): Set<string> | null {
+  const ids = dictEntries(project.objects)
+    .filter(([, obj]) => predicate(obj))
+    .map(([id]) => id);
+  return ids.length > 0 ? new Set(ids) : null;
 }

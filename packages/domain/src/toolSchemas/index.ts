@@ -1,88 +1,34 @@
 // ============================================================================
-// WebMCP Tool Schemas (Zod → JSON Schema)
+// WebMCP Tool Schemas
 // ============================================================================
+//
+// Zod is the single source of truth for tool contracts (ADR-005). This module
+// declares input schemas only; `@vistect/webmcp` compiles them to JSON Schema
+// with `additionalProperties: false` at registration time.
+//
+// Schemas are imported from `../schema` rather than redeclared, so a change to
+// a branded id or shared value object cannot silently diverge between the
+// domain model and the agent-facing contract.
 
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import type {
-  ProjectId,
-  PageId,
-  ObjectId,
-  AssetId,
-  DatasetId,
-  DiagramId,
-  ChartId,
-  DecisionId,
-  FindingId,
-  ExportJobId,
-  ActorId,
-  Bounds,
-  RelativeConstraint,
-  AccessibilityMetadata,
-  ApprovalState,
-  CropSpec,
-  DecisionCategory,
-  FindingCategory,
-  FindingSeverity,
-  EvidenceType,
-  DocumentType,
-  PageTemplate,
-  PageStatus,
-  DocumentStatus,
-  ChartType,
-  DiagramType,
-  AssetSourceType,
-  ObjectRole,
-  ObjectKind,
+
+import {
+  ProjectId as ProjectIdSchema,
+  PageId as PageIdSchema,
+  ObjectId as ObjectIdSchema,
+  AssetId as AssetIdSchema,
+  DatasetId as DatasetIdSchema,
+  DiagramId as DiagramIdSchema,
+  ChartId as ChartIdSchema,
+  DecisionId as DecisionIdSchema,
+  FindingId as FindingIdSchema,
+  ExportJobId as ExportJobIdSchema,
+  ActorId as ActorIdSchema,
+  AccessibilityMetadataSchema,
+  BoundsSchema,
+  CropSpecSchema,
+  RelativeConstraintSchema,
 } from '../schema';
-
-// ============================================================================
-// Base Input Schemas
-// ============================================================================
-
-const ProjectIdSchema = z.string().brand('ProjectId');
-const PageIdSchema = z.string().brand('PageId');
-const ObjectIdSchema = z.string().brand('ObjectId');
-const AssetIdSchema = z.string().brand('AssetId');
-const DatasetIdSchema = z.string().brand('DatasetId');
-const DiagramIdSchema = z.string().brand('DiagramId');
-const ChartIdSchema = z.string().brand('ChartId');
-const DecisionIdSchema = z.string().brand('DecisionId');
-const FindingIdSchema = z.string().brand('FindingId');
-const ExportJobIdSchema = z.string().brand('ExportJobId');
-const ActorIdSchema = z.string().brand('ActorId');
-
-const BoundsSchema = z.object({
-  x: z.number(),
-  y: z.number(),
-  w: z.number().positive(),
-  h: z.number().positive(),
-});
-
-const RelativeConstraintSchema = z.object({
-  anchorId: ObjectIdSchema,
-  relationship: z.enum(['before', 'after', 'above', 'below', 'left_of', 'right_of', 'inside_same_region']),
-  spacing: z.number().nonnegative().optional(),
-});
-
-const AccessibilityMetadataSchema = z.object({
-  isDecorative: z.boolean().default(false),
-  altText: z.string().optional(),
-  longDescription: z.string().optional(),
-  accessibleName: z.string().optional(),
-  role: z.string().optional(),
-  includedInReadingOrder: z.boolean().default(true),
-  language: z.string().optional(),
-  warnings: z.array(z.string()).default([]),
-});
-
-const ApprovalStateSchema = z.enum(['unreviewed', 'proposed', 'approved', 'rejected', 'stale']);
-
-const CropSpecSchema = z.object({
-  rect: BoundsSchema,
-  aspectRatio: z.number().positive().optional(),
-  intent: z.string(),
-});
 
 // ============================================================================
 // Project Tools (11)
@@ -659,10 +605,23 @@ export const identifyAccessibilityDefectsInputSchema = z.object({
 // Tool Definitions with Annotations
 // ============================================================================
 
+/**
+ * A WebMCP tool contract.
+ *
+ * `inputSchema` holds the **Zod schema**, not pre-compiled JSON Schema. Zod is
+ * the single source of truth (ADR-005); `packages/webmcp` compiles it once at
+ * registration time via `createSchemaCompiler()`. Storing JSON Schema here
+ * previously caused a double compile (`zodToJsonSchema` applied to its own
+ * output), which threw `Cannot read properties of undefined (reading
+ * 'typeName')` and prevented every tool from registering.
+ */
 export interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: Record<string, unknown>;
+  /** Optional human-facing label shown by agent UIs. */
+  title?: string;
+  /** Zod schema for the tool input. Compiled to JSON Schema by `@vistect/webmcp`. */
+  inputSchema: z.ZodTypeAny;
   annotations: {
     readOnlyHint: boolean;
     untrustedContentHint: boolean;
@@ -674,67 +633,67 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'create_project',
     description: 'Create a new document project with title, language, type, intent contract, and theme',
-    inputSchema: zodToJsonSchema(createProjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: createProjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'update_project',
     description: 'Update project metadata',
-    inputSchema: zodToJsonSchema(updateProjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: updateProjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'delete_project',
     description: 'Delete a project',
-    inputSchema: zodToJsonSchema(deleteProjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: deleteProjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'get_project',
     description: 'Get project details',
-    inputSchema: zodToJsonSchema(getProjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getProjectInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'list_projects',
     description: 'List all projects',
-    inputSchema: zodToJsonSchema(listProjectsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: listProjectsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'encrypt_project',
     description: 'Encrypt project with passphrase',
-    inputSchema: zodToJsonSchema(encryptProjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: encryptProjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'import_project',
     description: 'Import project from serialized data',
-    inputSchema: zodToJsonSchema(importProjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: importProjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: true },
   },
   {
     name: 'get_project_status',
     description: 'Get document lifecycle status',
-    inputSchema: zodToJsonSchema(getProjectStatusInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getProjectStatusInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'request_review',
     description: 'Request review transition (draft → review)',
-    inputSchema: zodToJsonSchema(requestReviewInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: requestReviewInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'lock_document',
     description: 'Lock document for export (requires manifest hash)',
-    inputSchema: zodToJsonSchema(lockDocumentInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: lockDocumentInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'unlock_document',
     description: 'Unlock document (human only)',
-    inputSchema: zodToJsonSchema(unlockDocumentInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: unlockDocumentInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
 
@@ -742,31 +701,31 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'create_text_object',
     description: 'Create a text object (heading, paragraph, list, etc.)',
-    inputSchema: zodToJsonSchema(createTextObjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: createTextObjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'update_text_object',
     description: 'Update a text object',
-    inputSchema: zodToJsonSchema(updateTextObjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: updateTextObjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'delete_text_object',
     description: 'Delete a text object',
-    inputSchema: zodToJsonSchema(deleteTextObjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: deleteTextObjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'reorder_text_objects',
     description: 'Reorder text objects in reading order',
-    inputSchema: zodToJsonSchema(reorderTextObjectsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: reorderTextObjectsInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'get_text_objects',
     description: 'Get text objects',
-    inputSchema: zodToJsonSchema(getTextObjectsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getTextObjectsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 
@@ -774,43 +733,43 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'upload_image',
     description: 'Upload an image asset',
-    inputSchema: zodToJsonSchema(uploadImageInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: uploadImageInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: true },
   },
   {
     name: 'inspect_image',
     description: 'Get structured analysis context for an image',
-    inputSchema: zodToJsonSchema(inspectImageInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: inspectImageInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'record_image_analysis',
     description: 'Record structured image analysis (observations/interpretations/uncertainties)',
-    inputSchema: zodToJsonSchema(recordImageAnalysisInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: recordImageAnalysisInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'compare_images',
     description: 'Compare multiple image candidates against criteria',
-    inputSchema: zodToJsonSchema(compareImagesInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: compareImagesInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: true },
   },
   {
     name: 'crop_image',
     description: 'Register a semantic crop for an image',
-    inputSchema: zodToJsonSchema(cropImageInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: cropImageInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'approve_alt_text',
     description: 'Approve alt text for an image',
-    inputSchema: zodToJsonSchema(approveAltTextInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: approveAltTextInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'get_image_assets',
     description: 'Get all image assets',
-    inputSchema: zodToJsonSchema(getImageAssetsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getImageAssetsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 
@@ -818,61 +777,61 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'create_diagram',
     description: 'Create a diagram (process flow, decision tree, etc.)',
-    inputSchema: zodToJsonSchema(createDiagramInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: createDiagramInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'update_diagram',
     description: 'Update a diagram',
-    inputSchema: zodToJsonSchema(updateDiagramInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: updateDiagramInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'delete_diagram',
     description: 'Delete a diagram',
-    inputSchema: zodToJsonSchema(deleteDiagramInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: deleteDiagramInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'add_diagram_node',
     description: 'Add a node to a diagram',
-    inputSchema: zodToJsonSchema(addDiagramNodeInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: addDiagramNodeInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'add_diagram_edge',
     description: 'Add an edge to a diagram',
-    inputSchema: zodToJsonSchema(addDiagramEdgeInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: addDiagramEdgeInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'apply_diagram_layout',
     description: 'Apply automatic layout to a diagram',
-    inputSchema: zodToJsonSchema(applyDiagramLayoutInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: applyDiagramLayoutInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'validate_diagram',
     description: 'Run structural and visual validation on a diagram',
-    inputSchema: zodToJsonSchema(validateDiagramInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: validateDiagramInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'describe_diagram',
     description: 'Generate semantic/spatial description of a diagram',
-    inputSchema: zodToJsonSchema(describeDiagramInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: describeDiagramInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'export_diagram',
     description: 'Export diagram as SVG, PNG, HTML, or tactile profile',
-    inputSchema: zodToJsonSchema(exportDiagramInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: exportDiagramInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'get_diagrams',
     description: 'Get all diagrams',
-    inputSchema: zodToJsonSchema(getDiagramsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getDiagramsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 
@@ -880,43 +839,43 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'import_dataset',
     description: 'Import a dataset from CSV, manual entry, or pasted table',
-    inputSchema: zodToJsonSchema(importDatasetInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: importDatasetInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: true },
   },
   {
     name: 'recommend_chart_types',
     description: 'Get deterministic chart type recommendations for a dataset',
-    inputSchema: zodToJsonSchema(recommendChartTypesInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: recommendChartTypesInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'create_chart',
     description: 'Create a chart from a dataset and spec',
-    inputSchema: zodToJsonSchema(createChartInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: createChartInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'update_chart',
     description: 'Update a chart',
-    inputSchema: zodToJsonSchema(updateChartInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: updateChartInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'delete_chart',
     description: 'Delete a chart',
-    inputSchema: zodToJsonSchema(deleteChartInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: deleteChartInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'validate_chart',
     description: 'Run integrity checks on a chart',
-    inputSchema: zodToJsonSchema(validateChartInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: validateChartInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'get_charts',
     description: 'Get all charts',
-    inputSchema: zodToJsonSchema(getChartsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getChartsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 
@@ -924,37 +883,37 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'search_icons',
     description: 'Search icons by meaning',
-    inputSchema: zodToJsonSchema(searchIconsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: searchIconsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'assign_icon',
     description: 'Assign an icon to a page',
-    inputSchema: zodToJsonSchema(assignIconInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: assignIconInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'update_icon',
     description: 'Update an icon',
-    inputSchema: zodToJsonSchema(updateIconInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: updateIconInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'delete_icon',
     description: 'Delete an icon',
-    inputSchema: zodToJsonSchema(deleteIconInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: deleteIconInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'validate_icons',
     description: 'Run icon consistency checks',
-    inputSchema: zodToJsonSchema(validateIconsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: validateIconsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'get_icon_system',
     description: 'Get document-wide icon system',
-    inputSchema: zodToJsonSchema(getIconSystemInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getIconSystemInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 
@@ -962,31 +921,31 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'create_page',
     description: 'Create a page from template',
-    inputSchema: zodToJsonSchema(createPageInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: createPageInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'delete_page',
     description: 'Delete a page',
-    inputSchema: zodToJsonSchema(deletePageInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: deletePageInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'reorder_pages',
     description: 'Reorder pages',
-    inputSchema: zodToJsonSchema(reorderPagesInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: reorderPagesInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'move_object',
     description: 'Move an object to another page',
-    inputSchema: zodToJsonSchema(moveObjectInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: moveObjectInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'set_object_constraints',
     description: 'Set relative placement constraints for an object',
-    inputSchema: zodToJsonSchema(setObjectConstraintsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: setObjectConstraintsInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
 
@@ -994,49 +953,49 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'run_validation',
     description: 'Run full validation suite',
-    inputSchema: zodToJsonSchema(runValidationInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: runValidationInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'get_findings',
     description: 'Get validation findings',
-    inputSchema: zodToJsonSchema(getFindingsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getFindingsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'resolve_finding',
     description: 'Mark a finding as resolved',
-    inputSchema: zodToJsonSchema(resolveFindingInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: resolveFindingInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'accept_finding',
     description: 'Accept a finding (risk acknowledged)',
-    inputSchema: zodToJsonSchema(acceptFindingInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: acceptFindingInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'dismiss_finding',
     description: 'Dismiss a subjective finding',
-    inputSchema: zodToJsonSchema(dismissFindingInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: dismissFindingInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'get_validation_summary',
     description: 'Get validation summary for export',
-    inputSchema: zodToJsonSchema(getValidationSummaryInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getValidationSummaryInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'preview_export_manifest',
     description: 'Preview export manifest',
-    inputSchema: zodToJsonSchema(previewExportManifestInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: previewExportManifestInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'approve_export_manifest',
     description: 'Approve export manifest (requires approval token)',
-    inputSchema: zodToJsonSchema(approveExportManifestInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: approveExportManifestInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
 
@@ -1044,43 +1003,43 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'create_decision',
     description: 'Stage a visual decision for approval',
-    inputSchema: zodToJsonSchema(createDecisionInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: createDecisionInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'approve_decision',
     description: 'Approve a staged decision (human only)',
-    inputSchema: zodToJsonSchema(approveDecisionInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: approveDecisionInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'reject_decision',
     description: 'Reject a staged decision',
-    inputSchema: zodToJsonSchema(rejectDecisionInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: rejectDecisionInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'request_decision_alternatives',
     description: 'Request new alternatives for a rejected decision',
-    inputSchema: zodToJsonSchema(requestDecisionAlternativesInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: requestDecisionAlternativesInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'finalize_export',
     description: 'Finalize export (requires approval token)',
-    inputSchema: zodToJsonSchema(finalizeExportInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: finalizeExportInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: false },
   },
   {
     name: 'get_decisions',
     description: 'Get visual decisions',
-    inputSchema: zodToJsonSchema(getDecisionsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getDecisionsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'get_export_jobs',
     description: 'Get export jobs',
-    inputSchema: zodToJsonSchema(getExportJobsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getExportJobsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 
@@ -1088,55 +1047,52 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'import_digital_pdf',
     description: 'Import a digital PDF for understanding',
-    inputSchema: zodToJsonSchema(importDigitalPdfInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: importDigitalPdfInputSchema,
     annotations: { readOnlyHint: false, untrustedContentHint: true },
   },
   {
     name: 'narrate_page',
     description: 'Get semantic and spatial narration of a page',
-    inputSchema: zodToJsonSchema(narratePageInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: narratePageInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'get_document_overview',
     description: 'Get document overview',
-    inputSchema: zodToJsonSchema(getDocumentOverviewInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: getDocumentOverviewInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'navigate_semantic',
     description: 'Navigate document semantically',
-    inputSchema: zodToJsonSchema(navigateSemanticInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: navigateSemanticInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'compare_visual_elements',
     description: 'Compare visual elements',
-    inputSchema: zodToJsonSchema(compareVisualElementsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: compareVisualElementsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
   {
     name: 'identify_accessibility_defects',
     description: 'Identify accessibility defects in imported document',
-    inputSchema: zodToJsonSchema(identifyAccessibilityDefectsInputSchema, { target: 'openApi3', strict: true }) as Record<string, unknown>,
+    inputSchema: identifyAccessibilityDefectsInputSchema,
     annotations: { readOnlyHint: true, untrustedContentHint: false },
   },
 ];
 
 // ============================================================================
-// Schema Compilation
+// Registry Lookups
 // ============================================================================
 
-export function compileToolSchemas(): Map<string, Record<string, unknown>> {
-  const schemas = new Map<string, Record<string, unknown>>();
-  for (const tool of toolDefinitions) {
-    schemas.set(tool.name, tool.inputSchema);
-  }
-  return schemas;
+/** Maps tool name → Zod input schema, for runtime input validation. */
+export function getToolInputSchemas(): Map<string, z.ZodTypeAny> {
+  return new Map(toolDefinitions.map((tool) => [tool.name, tool.inputSchema]));
 }
 
 export function getToolDefinition(name: string): ToolDefinition | undefined {
-  return toolDefinitions.find(t => t.name === name);
+  return toolDefinitions.find((t) => t.name === name);
 }
 
 export function getAllToolNames(): string[] {

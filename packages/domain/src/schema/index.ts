@@ -1,5 +1,18 @@
-import { z } from 'zod';
 import { nanoid } from 'nanoid';
+import { z } from 'zod';
+
+// Re-export command types
+export type {
+  Command,
+  CommandResult,
+  DomainError,
+  StaleVersionError,
+  LockViolationError,
+  ApprovalDeniedError,
+  NotFoundError,
+  RateLimitedError,
+  SchemaValidationError,
+} from '../commands';
 
 // ============================================================================
 // ID Types (branded strings for type safety)
@@ -496,6 +509,9 @@ export const DiagramGroupSchema = z.object({
 });
 export type DiagramGroup = z.infer<typeof DiagramGroupSchema>;
 
+export const DiagramLayoutSchema = z.enum(['layered', 'force', 'hierarchical']);
+export type DiagramLayout = z.infer<typeof DiagramLayoutSchema>;
+
 export const DiagramSchema = z.object({
   id: DiagramId,
   type: DiagramTypeSchema,
@@ -504,7 +520,7 @@ export const DiagramSchema = z.object({
   groups: z.array(DiagramGroupSchema).default([]),
   entryNodeId: NodeId.optional(),
   terminalNodeIds: z.array(NodeId).default([]),
-  layout: z.enum(['layered', 'force', 'hierarchical']).default('layered'),
+  layout: DiagramLayoutSchema.default('layered'),
   layoutSeed: z.number().int().default(42),
   accessibility: AccessibilityMetadataSchema,
   specVersion: z.number().int().nonnegative().default(0),

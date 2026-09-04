@@ -1,7 +1,22 @@
 // ============================================================================
 // Decisions Module
 // ============================================================================
+//
+// Decision creation is a pure function; state transitions emit events that the
+// command bus stamps with the real `projectId` and `version`. Handlers that
+// cannot yet emit a correct event throw rather than returning `[]`, so a
+// silently-dropped transition cannot masquerade as success.
 
+import { nanoid } from 'nanoid';
+
+
+import type { DomainEvent } from '../events';
+import {
+  createDecisionApprovedEvent,
+  createDecisionRejectedEvent,
+  createDecisionStaledEvent,
+  createDecisionUpdatedEvent,
+} from '../events';
 import type {
   VisualDecision,
   DecisionCategory,
@@ -11,11 +26,7 @@ import type {
   ActorId,
   ObjectId,
   PageId,
-  ApprovalState,
 } from '../schema';
-
-import type { DomainEvent } from '../events';
-import { createDecisionCreatedEvent, createDecisionApprovedEvent, createDecisionRejectedEvent } from '../events';
 
 // ============================================================================
 // Decision Registry
@@ -23,10 +34,15 @@ import { createDecisionCreatedEvent, createDecisionApprovedEvent, createDecision
 
 export interface DecisionRegistry {
   createDecision(params: CreateDecisionParams): VisualDecision;
-  approveDecision(decisionId: DecisionId, selectedOptionId: OptionId, reason: string | undefined, actorId: ActorId): DomainEvent[];
+  approveDecision(
+    decisionId: DecisionId,
+    selectedOptionId: OptionId,
+    reason: string | undefined,
+    actorId: ActorId
+  ): DomainEvent[];
   rejectDecision(decisionId: DecisionId, reason: string, actorId: ActorId): DomainEvent[];
-  requestAlternatives(decisionId: DecisionId): DomainEvent[];
-  staleDecision(decisionId: DecisionId, reason: string): DomainEvent[];
+  requestAlternatives(decisionId: DecisionId, actorId: ActorId): DomainEvent[];
+  staleDecision(decisionId: DecisionId, reason: string, actorId: ActorId): DomainEvent[];
 }
 
 export interface CreateDecisionParams {
@@ -38,6 +54,16 @@ export interface CreateDecisionParams {
   options: DecisionOption[];
   version: number;
 }
+
+/**
+ * Placeholder identifiers stamped by the command bus.
+ *
+ * Registry functions do not know the project or version they will be appended
+ * at; the bus rewrites these fields when it appends. They are constants rather
+ * than empty strings so an unstamped event is obvious in a log.
+ */
+const PENDING_PROJECT_ID = '__pending_project__';
+const PENDING_VERSION = -1;
 
 export function createDecisionRegistry(): DecisionRegistry {
   return {
@@ -52,7 +78,7 @@ export function createDecisionRegistry(): DecisionRegistry {
 function createDecision(params: CreateDecisionParams): VisualDecision {
   const now = new Date().toISOString();
   return {
-    id: `dec_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as DecisionId,
+    id: `dec_${nanoid(12)}` as DecisionId,
     category: params.category,
     targetObjectIds: params.targetObjectIds,
     targetPageIds: params.targetPageIds,
@@ -60,7 +86,7 @@ function createDecision(params: CreateDecisionParams): VisualDecision {
     suggestedBy: params.suggestedBy,
     options: params.options.map((opt, idx) => ({
       ...opt,
-      id: `opt_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as OptionId,
+      id: `opt_${nanoid(12)}` as OptionId,
       isSelected: idx === 0,
     })),
     createdAt: now,
@@ -76,8 +102,8 @@ function approveDecision(
 ): DomainEvent[] {
   return [
     createDecisionApprovedEvent(
-      '', // projectId filled by caller
-      0, // version filled by caller
+      PENDING_PROJECT_ID,
+      PENDING_VERSION,
       actorId,
       decisionId,
       selectedOptionId,
@@ -86,38 +112,37 @@ function approveDecision(
   ];
 }
 
-function rejectDecision(
-  decisionId: DecisionId,
-  reason: string,
-  actorId: ActorId
-): DomainEvent[] {
+function rejectDecision(decisionId: DecisionId, reason: string, actorId: ActorId): DomainEvent[] {
   return [
-    createDecisionRejectedEvent(
-      '', // projectId filled by caller
-      0, // version filled by caller
-      actorId,
-      decisionId,
-      reason
-    ),
+    createDecisionRejectedEvent(PENDING_PROJECT_ID, PENDING_VERSION, actorId, decisionId, reason),
   ];
 }
 
-function requestAlternatives(decisionId: DecisionId): DomainEvent[] {
-  // Returns event to transition decision back to proposed
-  return [];
+function requestAlternatives(decisionId: DecisionId, actorId: ActorId): DomainEvent[] {
+  // Rejecting-with-alternatives returns the decision to `proposed` so the agent
+  // can supply new options; recorded as an update, not a new decision (I-12).
+  return [
+    createDecisionUpdatedEvent(PENDING_PROJECT_ID, PENDING_VERSION, actorId, decisionId, {
+      status: 'proposed',
+      options: [],
+    }),
+  ];
 }
 
-function staleDecision(decisionId: DecisionId, reason: string): DomainEvent[] {
-  // Returns event to mark decision as stale
-  return [];
+function staleDecision(decisionId: DecisionId, reason: string, actorId: ActorId): DomainEvent[] {
+  return [
+    createDecisionStaledEvent(PENDING_PROJECT_ID, PENDING_VERSION, actorId, decisionId, reason),
+  ];
 }
 
 // ============================================================================
 // Decision Helpers
 // ============================================================================
 
-export function getUnreviewedDecisions(decisions: Record<string, VisualDecision>): VisualDecision[] {
-  return Object.values(decisions).filter(d => d.status === 'unreviewed' || d.status === 'proposed');
+export function getUnreviewedDecisions(
+  decisions: Record<string, VisualDecision>
+): VisualDecision[] {
+  return Object.values(decisions).filter((d) => d.status === 'open' || d.status === 'proposed');
 }
 
 export function getStaleDecisions(decisions: Record<string, VisualDecision>): VisualDecision[] {
@@ -191,7 +216,7 @@ export function createDecisionOption(
 }
 
 export function createImageSelectionOptions(
-  candidates: Array<{ assetId: string; criteriaScores: Record<string, number> }>
+  candidates: { assetId: string; criteriaScores: Record<string, number> }[]
 ): DecisionOption[] {
   return candidates.map((candidate, idx) => ({
     id: `opt_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as OptionId,
@@ -204,7 +229,7 @@ export function createImageSelectionOptions(
 }
 
 export function createChartTypeOptions(
-  recommendations: Array<{ type: string; reason: string }>
+  recommendations: { type: string; reason: string }[]
 ): DecisionOption[] {
   return recommendations.map((rec, idx) => ({
     id: `opt_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as OptionId,
@@ -215,7 +240,7 @@ export function createChartTypeOptions(
 }
 
 export function createIconMetaphorOptions(
-  metaphors: Array<{ name: string; meaning: string; confidence: number }>
+  metaphors: { name: string; meaning: string; confidence: number }[]
 ): DecisionOption[] {
   return metaphors.map((m, idx) => ({
     id: `opt_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as OptionId,

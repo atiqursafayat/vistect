@@ -8,26 +8,34 @@ import type {
   FindingCategory,
   FindingSeverity,
   EvidenceType,
-  FindingStatus,
   SuggestedAction,
   FindingId,
   ObjectId,
   PageId,
+  ProjectId,
   DocumentObject,
-  Page,
-  Chart,
-  Diagram,
-  ImageAsset,
-  Dataset,
+  TextObject,
   Bounds,
-  AccessibilityMetadata,
+  Diagram,
 } from '../schema';
 
-import { FindingCategorySchema, FindingSeveritySchema, EvidenceTypeSchema, FindingStatusSchema } from '../schema';
+// ============================================================================
+// Utilities
+// ============================================================================
+//
+// `z.record(BrandedId, Schema).default({})` produces `Partial<Record<K, V>>`
+// which means `Object.values()` yields `(V | undefined)[]` under
+// noUncheckedIndexedAccess. These helpers strip the undefineds once.
 
-// ============================================================================
-// Finding Registry
-// ============================================================================
+function projectPages(project: DocumentProject) {
+  return Object.values(project.pages).filter((p): p is NonNullable<typeof p> => p !== undefined);
+}
+
+function projectObjects(project: DocumentProject) {
+  return Object.values(project.objects).filter((o): o is NonNullable<typeof o> => o !== undefined);
+}
+
+
 
 export interface FindingRegistry {
   registerFinding(finding: Omit<ValidationFinding, 'id' | 'createdAt' | 'updatedAt'>): ValidationFinding;
@@ -94,7 +102,7 @@ export function createFindingRegistry(): FindingRegistry {
     const toRemove: FindingId[] = [];
     for (const [id, finding] of findings) {
       if (scope === 'document' || (scope === 'page' && finding.targetId === targetId) || (scope === 'object' && finding.targetId === targetId)) {
-        toRemove.push(id);
+        toRemove.push(id as FindingId);
       }
     }
     for (const id of toRemove) findings.delete(id);
@@ -133,20 +141,21 @@ export function createFindingRegistry(): FindingRegistry {
 function validateLayout(project: DocumentProject, scope?: string, targetId?: string): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
-  for (const page of Object.values(project.pages)) {
+  for (const page of projectPages(project)) {
     if (scope === 'page' && targetId && page.id !== targetId) continue;
     if (scope === 'object' && targetId) {
-      const obj = project.objects[targetId];
-      if (!obj || !page.objects.includes(targetId)) continue;
+      const obj = project.objects[targetId as ObjectId];
+      if (!obj || !page.objects.includes(targetId as ObjectId)) continue;
     }
 
-    const pageObjects = page.objects.map(id => project.objects[id]).filter(Boolean) as DocumentObject[];
+    const pageObjects = page.objects.map(id => project.objects[id]).filter((o): o is DocumentObject => o !== undefined);
 
     // Overlap detection
     for (let i = 0; i < pageObjects.length; i++) {
       for (let j = i + 1; j < pageObjects.length; j++) {
         const a = pageObjects[i];
         const b = pageObjects[j];
+        if (a === undefined || b === undefined) continue;
         if (boundsOverlap(a.bounds, b.bounds)) {
           findings.push(createFinding({
             scope: 'object',
@@ -208,8 +217,11 @@ function validateLayout(project: DocumentProject, scope?: string, targetId?: str
     // Spacing consistency
     // Check vertical spacing between consecutive objects in reading order
     for (let i = 0; i < page.readingOrder.length - 1; i++) {
-      const a = project.objects[page.readingOrder[i]];
-      const b = project.objects[page.readingOrder[i + 1]];
+      const idA = page.readingOrder[i];
+      const idB = page.readingOrder[i + 1];
+      if (!idA || !idB) continue;
+      const a = project.objects[idA];
+      const b = project.objects[idB];
       if (a && b) {
         const spacing = b.bounds.y - (a.bounds.y + a.bounds.h);
         if (spacing < 8 || spacing > 64) {
@@ -277,7 +289,8 @@ function validateLayout(project: DocumentProject, scope?: string, targetId?: str
 function validateText(project: DocumentProject, scope?: string, targetId?: string): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
+    if (!obj) continue;
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
     if (obj.kind !== 'text') continue;
 
@@ -333,21 +346,25 @@ function validateText(project: DocumentProject, scope?: string, targetId?: strin
   }
 
   // Heading hierarchy
-  const headings = Object.values(project.objects)
-    .filter(o => o.kind === 'text' && o.role === 'heading')
-    .sort((a, b) => (a.headingLevel || 1) - (b.headingLevel || 1));
+  const headings = projectObjects(project)
+    .filter((o): o is TextObject => o.kind === 'text' && o.role === 'heading')
+    .sort((a, b) => (a.headingLevel ?? 1) - (b.headingLevel ?? 1));
 
   for (let i = 1; i < headings.length; i++) {
     const prev = headings[i - 1];
     const curr = headings[i];
-    if ((curr.headingLevel || 1) > (prev.headingLevel || 1) + 1) {
+    if (prev === undefined || curr === undefined) continue;
+
+    const prevLevel = prev.headingLevel ?? 1;
+    const currLevel = curr.headingLevel ?? 1;
+    if (currLevel > prevLevel + 1) {
       findings.push(createFinding({
         scope: 'object',
         targetId: curr.id,
         category: 'text.heading_hierarchy',
         severity: 'error',
         evidenceType: 'deterministic',
-        summary: `Heading level jumps from H${prev.headingLevel} to H${curr.headingLevel}`,
+        summary: `Heading level jumps from H${prevLevel} to H${currLevel}`,
         evidence: [`Previous: ${prev.content.slice(0, 50)}`, `Current: ${curr.content.slice(0, 50)}`],
         suggestedActions: [
           { type: 'fix', description: 'Adjust heading levels to maintain hierarchy', toolName: 'update_object' },
@@ -357,10 +374,12 @@ function validateText(project: DocumentProject, scope?: string, targetId?: strin
   }
 
   // Missing/orphan headings
-  for (const page of Object.values(project.pages)) {
+  for (const page of projectPages(project)) {
     const pageHeadings = page.readingOrder
       .map(id => project.objects[id])
-      .filter((o): o is DocumentObject => o !== undefined && o.kind === 'text' && o.role === 'heading');
+      .filter(
+        (o): o is DocumentObject => o?.kind === 'text' && o.role === 'heading'
+      );
     if (pageHeadings.length === 0 && page.objects.length > 0) {
       findings.push(createFinding({
         scope: 'page',
@@ -391,7 +410,7 @@ function validateColor(project: DocumentProject, scope?: string, targetId?: stri
   // This is a placeholder for the deterministic checks
 
   // Color-only distinction check
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
 
     // Check if object uses color as only distinguishing feature
@@ -408,11 +427,11 @@ function validateColor(project: DocumentProject, scope?: string, targetId?: stri
 function validateImages(project: DocumentProject, scope?: string, targetId?: string): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
     if (obj.kind !== 'image') continue;
 
-    // Missing alt text
+    // Missing alt text — obj is narrowed to ImageObject here
     if (!obj.accessibility.isDecorative && (!obj.altTextApproved || obj.altTextApproved.trim() === '')) {
       findings.push(createFinding({
         scope: 'object',
@@ -513,7 +532,7 @@ function validateImages(project: DocumentProject, scope?: string, targetId?: str
 function validateCharts(project: DocumentProject, scope?: string, targetId?: string): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
     if (obj.kind !== 'chart') continue;
 
@@ -526,7 +545,9 @@ function validateCharts(project: DocumentProject, scope?: string, targetId?: str
       if (dataset) {
         // Verify bar values match dataset
         for (const bar of chart.geometry.bars) {
-          const col = dataset.columns[chart.spec.series[bar.seriesIndex].dataColumnId];
+          const seriesSpec = chart.spec.series[bar.seriesIndex];
+          if (!seriesSpec) continue;
+          const col = dataset.columns.find(c => c.id === seriesSpec.dataColumnId);
           if (col && col.values[bar.categoryIndex] !== bar.value) {
             findings.push(createFinding({
               scope: 'object',
@@ -535,7 +556,7 @@ function validateCharts(project: DocumentProject, scope?: string, targetId?: str
               severity: 'blocking',
               evidenceType: 'deterministic',
               summary: `Chart ${obj.id} bar value mismatch at series ${bar.seriesIndex}, category ${bar.categoryIndex}`,
-              evidence: [`Geometry: ${bar.value}`, `Dataset: ${col.values[bar.categoryIndex]}`],
+              evidence: [`Geometry: ${bar.value}`, `Dataset: ${String(col.values[bar.categoryIndex] ?? '')}`],
               suggestedActions: [
                 { type: 'fix', description: 'Regenerate chart geometry from dataset', toolName: 'render_chart' },
               ],
@@ -547,7 +568,8 @@ function validateCharts(project: DocumentProject, scope?: string, targetId?: str
 
     // Missing/truncated labels
     for (const series of chart.spec.series) {
-      const col = project.datasets[chart.spec.datasetId]?.columns[series.dataColumnId];
+      const dataset = project.datasets[chart.spec.datasetId];
+      const col = dataset?.columns.find(c => c.id === series.dataColumnId);
       if (col && series.name.length > 30) {
         findings.push(createFinding({
           scope: 'object',
@@ -565,7 +587,7 @@ function validateCharts(project: DocumentProject, scope?: string, targetId?: str
     }
 
     // Baseline anomalies
-    if (chart.spec.yAxis.baselineZero === false) {
+    if (!chart.spec.yAxis.baselineZero) {
       findings.push(createFinding({
         scope: 'object',
         targetId: obj.id,
@@ -573,7 +595,7 @@ function validateCharts(project: DocumentProject, scope?: string, targetId?: str
         severity: 'warning',
         evidenceType: 'deterministic',
         summary: `Chart ${obj.id} uses non-zero baseline`,
-        evidence: [`Baseline: ${chart.spec.yAxis.min}`],
+        evidence: [`Baseline: ${chart.spec.yAxis.min ?? 'unset'}`],
         suggestedActions: [
           { type: 'review', description: 'Confirm non-zero baseline is intentional', toolName: 'approve_chart_baseline' },
         ],
@@ -623,7 +645,7 @@ function validateCharts(project: DocumentProject, scope?: string, targetId?: str
 function validateDiagrams(project: DocumentProject, scope?: string, targetId?: string): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
     if (obj.kind !== 'diagram') continue;
 
@@ -750,7 +772,7 @@ function validateDiagrams(project: DocumentProject, scope?: string, targetId?: s
     // Duplicate edges
     const edgeKeys = new Set<string>();
     for (const edge of edges) {
-      const key = `${edge.from}-${edge.to}-${edge.label || ''}`;
+      const key = `${edge.from}\u0000${edge.to}\u0000${edge.label ?? ''}`;
       if (edgeKeys.has(key)) {
         findings.push(createFinding({
           scope: 'object',
@@ -787,34 +809,23 @@ function validateDiagrams(project: DocumentProject, scope?: string, targetId?: s
     }
 
     // Visual validation (FR-075)
-    // Edge crossings
-    const crossings = countEdgeCrossings(diagram);
-    if (crossings > 0) {
-      findings.push(createFinding({
-        scope: 'object',
-        targetId: obj.id,
-        category: 'diagram.edge_crossings',
-        severity: 'warning',
-        evidenceType: 'deterministic',
-        summary: `Diagram ${obj.id} has ${crossings} edge crossings`,
-        evidence: [],
-        suggestedActions: [
-          { type: 'fix', description: 'Reapply layout to minimize crossings', toolName: 'apply_diagram_layout' },
-        ],
-      }));
-    }
+    // Edge crossings — full geometry computation deferred to layout phase
+    // const crossings = countEdgeCrossings(diagram); // not yet implemented
 
     // Node overlaps
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
-        if (boundsOverlap(nodes[i].bounds, nodes[j].bounds)) {
+        const ni = nodes[i];
+        const nj = nodes[j];
+        if (ni === undefined || nj === undefined) continue;
+        if (boundsOverlap(ni.bounds, nj.bounds)) {
           findings.push(createFinding({
             scope: 'object',
             targetId: obj.id,
             category: 'diagram.node_overlaps',
             severity: 'error',
             evidenceType: 'deterministic',
-            summary: `Diagram ${obj.id} nodes overlap: ${nodes[i].id} and ${nodes[j].id}`,
+            summary: `Diagram ${obj.id} nodes overlap: ${ni.id} and ${nj.id}`,
             evidence: [],
             suggestedActions: [
               { type: 'fix', description: 'Reapply layout', toolName: 'apply_diagram_layout' },
@@ -881,10 +892,7 @@ function validateDiagrams(project: DocumentProject, scope?: string, targetId?: s
       }));
     }
 
-    // Excessive bends
-    for (const edge of edges) {
-      // Simplified - would need actual bend count from geometry
-    }
+    // Excessive bends — deferred to layout phase where geometry is available
 
     // Reading order mismatch
     // Check if visual order matches logical order
@@ -925,13 +933,13 @@ function validateAccessibility(project: DocumentProject, scope?: string, targetI
   const findings: ValidationFinding[] = [];
 
   // Reading order defects
-  for (const page of Object.values(project.pages)) {
+  for (const page of projectPages(project)) {
     if (scope === 'page' && targetId && page.id !== targetId) continue;
 
     // Check for gaps in reading order
     const includedObjects = page.objects.filter(id => {
       const obj = project.objects[id];
-      return obj && obj.accessibility.includedInReadingOrder;
+      return obj?.accessibility.includedInReadingOrder;
     });
     const readingOrderSet = new Set(page.readingOrder);
 
@@ -1004,7 +1012,7 @@ function validateAccessibility(project: DocumentProject, scope?: string, targetI
   }
 
   // Decorative exposure
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
     if (obj.accessibility.isDecorative && obj.accessibility.includedInReadingOrder) {
       findings.push(createFinding({
@@ -1023,7 +1031,7 @@ function validateAccessibility(project: DocumentProject, scope?: string, targetI
   }
 
   // Meaningful exclusion
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
     if (!obj.accessibility.isDecorative && !obj.accessibility.includedInReadingOrder) {
       findings.push(createFinding({
@@ -1042,9 +1050,10 @@ function validateAccessibility(project: DocumentProject, scope?: string, targetI
   }
 
   // Inaccessible names
-  for (const obj of Object.values(project.objects)) {
+  for (const obj of projectObjects(project)) {
     if (scope === 'object' && targetId && obj.id !== targetId) continue;
-    if (obj.kind === 'image' && !obj.accessibility.isDecorative && !obj.altTextApproved) {
+    if (obj.kind !== 'image') continue;
+    if (!obj.accessibility.isDecorative && !obj.altTextApproved) {
       findings.push(createFinding({
         scope: 'object',
         targetId: obj.id,
@@ -1067,7 +1076,7 @@ function validateAccessibility(project: DocumentProject, scope?: string, targetI
 // Subjective AI Assessments (FR-118)
 // ============================================================================
 
-export function validateSubjective(project: DocumentProject, scope?: string, targetId?: string): ValidationFinding[] {
+export function validateSubjective(_project: DocumentProject): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
   // Weak hierarchy
@@ -1100,7 +1109,7 @@ function createFinding(params: {
   return {
     id: `fnd_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as FindingId,
     scope: params.scope,
-    targetId: params.targetId as ObjectId | PageId | string,
+    targetId: params.targetId as (ProjectId | PageId | ObjectId),
     category: params.category,
     severity: params.severity,
     evidenceType: params.evidenceType,
@@ -1127,7 +1136,7 @@ function boundsWithin(inner: Bounds, outer: Bounds): boolean {
          inner.y + inner.h <= outer.y + outer.h;
 }
 
-function getPageBounds(template: string): Bounds {
+function getPageBounds(_template: string): Bounds {
   // A4 at 72 DPI: 595 x 842 points
   return { x: 0, y: 0, w: 595, h: 842 };
 }
@@ -1144,9 +1153,11 @@ function checkMargins(bounds: Bounds, pageBounds: Bounds): { violated: boolean; 
 function groupByColumn(objects: DocumentObject[]): DocumentObject[][] {
   const columns: Record<number, DocumentObject[]> = {};
   for (const obj of objects) {
-    const col = Math.round(obj.bounds.x / 50) * 50; // 50px grid
-    if (!columns[col]) columns[col] = [];
-    columns[col].push(obj);
+    // 50pt grid: objects within half a grid cell are treated as one column.
+    const col = Math.round(obj.bounds.x / 50) * 50;
+    const column = columns[col] ?? [];
+    column.push(obj);
+    columns[col] = column;
   }
   return Object.values(columns).filter(c => c.length > 1);
 }
@@ -1168,16 +1179,19 @@ function findReachableNodes(diagram: Diagram, entryId: string): Set<string> {
   const adjacency = new Map<string, string[]>();
 
   for (const edge of diagram.edges) {
-    if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
-    adjacency.get(edge.from)!.push(edge.to);
+    const successors = adjacency.get(edge.from);
+    if (successors === undefined) {
+      adjacency.set(edge.from, [edge.to]);
+    } else {
+      successors.push(edge.to);
+    }
   }
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (reachable.has(current)) continue;
+    const current = queue.shift();
+    if (current === undefined || reachable.has(current)) continue;
     reachable.add(current);
-    const neighbors = adjacency.get(current) || [];
-    for (const neighbor of neighbors) {
+    for (const neighbor of adjacency.get(current) ?? []) {
       if (!reachable.has(neighbor)) queue.push(neighbor);
     }
   }
@@ -1191,15 +1205,19 @@ function hasCycle(diagram: Diagram): boolean {
   const adjacency = new Map<string, string[]>();
 
   for (const edge of diagram.edges) {
-    if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
-    adjacency.get(edge.from)!.push(edge.to);
+    const successors = adjacency.get(edge.from);
+    if (successors === undefined) {
+      adjacency.set(edge.from, [edge.to]);
+    } else {
+      successors.push(edge.to);
+    }
   }
 
   function dfs(node: string): boolean {
     visited.add(node);
     recStack.add(node);
 
-    for (const neighbor of adjacency.get(node) || []) {
+    for (const neighbor of adjacency.get(node) ?? []) {
       if (!visited.has(neighbor)) {
         if (dfs(neighbor)) return true;
       } else if (recStack.has(neighbor)) {
@@ -1215,9 +1233,9 @@ function hasCycle(diagram: Diagram): boolean {
     if (!visited.has(node.id)) {
       if (dfs(node.id)) return true;
     }
-
-    return false;
   }
+
+  return false;
 }
 
 function getDiagramBounds(diagram: Diagram): Bounds {
@@ -1233,9 +1251,10 @@ function getDiagramBounds(diagram: Diagram): Bounds {
 }
 
 function getLogicalOrder(diagram: Diagram): string[] {
-  // BFS from entry
-  const reachable = findReachableNodes(diagram, diagram.entryNodeId!);
-  return Array.from(reachable);
+  // Without an entry node there is no defined traversal start; an empty logical
+  // order is correct and the missing entry is reported by topology validation.
+  if (diagram.entryNodeId === undefined) return [];
+  return [...findReachableNodes(diagram, diagram.entryNodeId)];
 }
 
 function getVisualOrder(diagram: Diagram): string[] {

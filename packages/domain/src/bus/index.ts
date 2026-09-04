@@ -1,50 +1,27 @@
 // ============================================================================
 // Command Bus
 // ============================================================================
+//
+// The single write path. Every mutation — from the UI, from a WebMCP tool, from
+// an import — passes through `dispatch`, in this order:
+//
+//   load project → load actor → version guard (I-02) → lock guard (I-01)
+//   → human-actor guard (I-03) → handler → invariant check → apply events
+//   → bump version → persist → append events
+//
+// Events are appended *after* the projection succeeds and the project is saved,
+// so a rejected command leaves no trace and a persisted event always has a
+// corresponding state change.
 
 import type {
   Command,
   CommandResult,
-  DomainError,
-  StaleVersionError,
-  LockViolationError,
-  ApprovalDeniedError,
-  NotFoundError,
-  RateLimitedError,
-  SchemaValidationError,
-  DocumentProject,
-  DocumentObject,
-  Actor,
-  ActorKind,
-  ApprovalState,
-  DocumentStatus,
-  PageStatus,
-  FindingStatus,
-  DecisionCategory,
-  VisualDecision,
-  ValidationFinding,
-  ImageAsset,
-  Diagram,
-  Chart,
-  Dataset,
-  Hash,
-  VersionId,
-  PageId,
-  ObjectId,
-  AssetId,
-  DatasetId,
-  DiagramId,
-  ChartId,
-  DecisionId,
-  FindingId,
-  ActorId,
-  ProjectId,
-} from '../schema';
-
+} from '../commands';
 import type { DomainEvent, EventEnvelope } from '../events';
-import { createEvent } from '../events';
+import { createAgentToolExecutedEvent } from '../events';
 import * as invariants from '../invariants';
-import * as machines from '../machines';
+import { createVersionId } from '../schema';
+import type { Actor, DocumentProject } from '../schema';
 
 // ============================================================================
 // Command Bus Types
@@ -103,6 +80,7 @@ export function createCommandBus(dependencies: {
     if (!project) {
       return {
         ok: false,
+        changedIds: [],
         error: 'Project not found',
         errorCode: 'NotFound',
       };
@@ -113,6 +91,7 @@ export function createCommandBus(dependencies: {
     if (!actor) {
       return {
         ok: false,
+        changedIds: [],
         error: 'Actor not found',
         errorCode: 'NotFound',
       };
@@ -122,6 +101,7 @@ export function createCommandBus(dependencies: {
     if (command.expectedVersion !== project.currentVersion) {
       return {
         ok: false,
+        changedIds: [],
         error: `Stale version: expected ${command.expectedVersion}, current is ${project.currentVersion}`,
         errorCode: 'StaleVersionError',
         version: project.currentVersion,
@@ -132,6 +112,7 @@ export function createCommandBus(dependencies: {
     if (project.status === 'locked' && isWriteCommand(command.type)) {
       return {
         ok: false,
+        changedIds: [],
         error: 'Document is locked; no mutations allowed',
         errorCode: 'LockViolation',
       };
@@ -141,6 +122,7 @@ export function createCommandBus(dependencies: {
     if (isApprovalCommand(command.type) && actor.kind !== 'human') {
       return {
         ok: false,
+        changedIds: [],
         error: 'Only human actors can approve decisions',
         errorCode: 'ApprovalDenied',
       };
@@ -151,6 +133,7 @@ export function createCommandBus(dependencies: {
     if (!handler) {
       return {
         ok: false,
+        changedIds: [],
         error: `No handler for command type: ${command.type}`,
         errorCode: 'NotFound',
       };
@@ -170,6 +153,7 @@ export function createCommandBus(dependencies: {
     } catch (error) {
       return {
         ok: false,
+        changedIds: [],
         error: error instanceof Error ? error.message : 'Unknown error',
         errorCode: 'SchemaValidationError',
       };
@@ -180,6 +164,7 @@ export function createCommandBus(dependencies: {
     if (invariantErrors.length > 0) {
       return {
         ok: false,
+        changedIds: [],
         error: `Invariant violations: ${invariantErrors.join('; ')}`,
         errorCode: 'SchemaValidationError',
       };
@@ -198,15 +183,9 @@ export function createCommandBus(dependencies: {
 
     context.project.updatedAt = new Date().toISOString();
 
-    // Persist
+    // Persist state first, then append events (I-13: durable append before ack).
     await saveProject(context.project);
-
-    // Append events with HMAC
-    const eventsWithHmac = result.events.map(event => ({
-      ...event,
-      hmac: computeHmac(event),
-    }));
-    await appendEvents(eventsWithHmac as EventEnvelope[]);
+    await appendEvents(result.events.map(stampPendingHmac));
 
     return {
       ok: true,
@@ -216,33 +195,33 @@ export function createCommandBus(dependencies: {
   }
 
   async function dispatchFromAgent(command: Command, toolName: string): Promise<CommandResult> {
-    // Additional agent-specific checks
-    if (isWriteCommand(command.type)) {
-      // Record agent activity
-      const startTime = performance.now();
-      const result = await dispatch(command);
-      const durationMs = Math.round(performance.now() - startTime);
-
-      if (result.ok) {
-        const agentEvent = createAgentToolExecutedEvent(
-          command.projectId,
-          result.version!,
-          command.actorId,
-          toolName,
-          command.payload,
-          { success: true },
-          'success',
-          command.expectedVersion,
-          result.version!,
-          durationMs
-        );
-        await appendEvents([{ ...agentEvent, hmac: computeHmac(agentEvent) }]);
-      }
-
-      return result;
+    if (!isWriteCommand(command.type)) {
+      return dispatch(command);
     }
 
-    return dispatch(command);
+    // Agent writes are additionally recorded in the activity stream (§21.3),
+    // including the version before and after, so every agent action is auditable.
+    const startTime = performance.now();
+    const result = await dispatch(command);
+    const durationMs = Math.round(performance.now() - startTime);
+
+    const versionAfter = result.version ?? command.expectedVersion;
+    const agentEvent = createAgentToolExecutedEvent(
+      command.projectId,
+      versionAfter,
+      command.actorId,
+      toolName,
+      command.payload,
+      result.ok ? { success: true } : { success: false, error: result.error ?? 'Unknown error' },
+      result.ok ? 'success' : 'error',
+      command.expectedVersion,
+      versionAfter,
+      durationMs
+    );
+    const eventsWithHmac = [stampPendingHmac(agentEvent)];
+    await appendEvents(eventsWithHmac);
+
+    return result;
   }
 
   return { dispatch, dispatchFromAgent };
@@ -252,13 +231,28 @@ export function createCommandBus(dependencies: {
 // Event Application
 // ============================================================================
 
-function applyEvent(project: DocumentProject, event: DomainEvent): void {
+/**
+ * Applies one event to a project, mutating it in place.
+ *
+ * Exported because snapshot recovery in `@vistect/storage` must replay events
+ * with **exactly** this logic; a second implementation there would drift and
+ * produce a recovered project that differs from the live one.
+ *
+ * Mutates rather than returning a copy: replaying thousands of events during
+ * recovery would otherwise allocate a full project clone per event.
+ */
+export function applyEvent(project: DocumentProject, event: DomainEvent): void {
   const { type, payload, timestamp } = event;
 
   // Type-safe event application using a switch on the discriminated union
   switch (type) {
-    case 'ProjectCreated': {
-      // Handled by initial project creation
+    // Project lifecycle events that carry no projection: creation is materialised
+    // by the create handler, and delete/encrypt/import are handled at the storage
+    // layer, not by mutating in-memory state.
+    case 'ProjectCreated':
+    case 'ProjectDeleted':
+    case 'ProjectEncrypted':
+    case 'ProjectImported': {
       break;
     }
     case 'ProjectUpdated': {
@@ -268,9 +262,10 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     }
     case 'PageCreated': {
       const { pageId, template, insertAfter } = payload;
-      const page: DocumentProject['pages'][string] = {
-        id: pageId as any,
-        template: template as any,
+      const typedPageId = pageId;
+      project.pages[typedPageId] = {
+        id: typedPageId,
+        template: template,
         status: 'draft',
         objects: [],
         readingOrder: [],
@@ -279,12 +274,12 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
         versionCreated: project.currentVersion,
         versionModified: project.currentVersion,
       };
-      project.pages[pageId] = page;
       if (insertAfter) {
-        const idx = project.pageOrder.indexOf(insertAfter);
-        project.pageOrder.splice(idx + 1, 0, pageId);
+        const insertAfterId = insertAfter;
+        const idx = project.pageOrder.indexOf(insertAfterId);
+        project.pageOrder.splice(idx + 1, 0, typedPageId);
       } else {
-        project.pageOrder.push(pageId);
+        project.pageOrder.push(typedPageId);
       }
       break;
     }
@@ -300,12 +295,9 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     }
     case 'PageDeleted': {
       const { pageId } = payload;
-      delete project.pages[pageId];
-      project.pageOrder = project.pageOrder.filter(id => id !== pageId);
-      // Also delete objects on this page
-      for (const [objId, obj] of Object.entries(project.objects)) {
-        if (project.pageOrder.includes(objId)) continue;
-      }
+      const typedPageId = pageId;
+      delete project.pages[typedPageId];
+      project.pageOrder = project.pageOrder.filter(id => id !== typedPageId);
       break;
     }
     case 'PageReordered': {
@@ -316,7 +308,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       const { pageId, newStatus } = payload;
       const page = project.pages[pageId];
       if (page) {
-        page.status = newStatus as any;
+        page.status = newStatus;
         page.updatedAt = timestamp;
         page.versionModified = project.currentVersion;
       }
@@ -338,10 +330,12 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     }
     case 'ObjectDeleted': {
       const { objectId } = payload;
-      delete project.objects[objectId];
+      const typedObjectId = objectId;
+      delete project.objects[typedObjectId];
       for (const page of Object.values(project.pages)) {
-        page.objects = page.objects.filter(id => id !== objectId);
-        page.readingOrder = page.readingOrder.filter(id => id !== objectId);
+        if (!page) continue;
+        page.objects = page.objects.filter(id => id !== typedObjectId);
+        page.readingOrder = page.readingOrder.filter(id => id !== typedObjectId);
       }
       break;
     }
@@ -366,8 +360,9 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     }
     case 'ObjectReadingOrderChanged': {
       const { pageId, readingOrder } = payload;
-      if (project.pages[pageId]) {
-        project.pages[pageId].readingOrder = readingOrder;
+      const page = project.pages[pageId];
+      if (page) {
+        page.readingOrder = readingOrder;
       }
       break;
     }
@@ -375,7 +370,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       const { objectId, newStatus, actorId, decisionId } = payload;
       const obj = project.objects[objectId];
       if (obj) {
-        obj.approval = newStatus as any;
+        obj.approval = newStatus;
         if (newStatus === 'approved') {
           obj.approvedBy = actorId;
           obj.approvedAt = timestamp;
@@ -411,9 +406,9 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     case 'AssetAnalysisRecorded': {
       const { assetId, observations, interpretations, uncertainties } = payload;
       if (project.assets[assetId]) {
-        project.assets[assetId].observations = observations as any;
-        project.assets[assetId].interpretations = interpretations as any;
-        project.assets[assetId].uncertainties = uncertainties as any;
+        project.assets[assetId].observations = observations;
+        project.assets[assetId].interpretations = interpretations;
+        project.assets[assetId].uncertainties = uncertainties;
       }
       break;
     }
@@ -463,7 +458,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     case 'DiagramNodeAdded': {
       const { diagramId, node } = payload;
       if (project.diagrams[diagramId]) {
-        project.diagrams[diagramId].nodes.push(node as any);
+        project.diagrams[diagramId].nodes.push(node);
       }
       break;
     }
@@ -472,8 +467,9 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       const diagram = project.diagrams[diagramId];
       if (diagram) {
         const idx = diagram.nodes.findIndex(n => n.id === nodeId);
-        if (idx >= 0) {
-          Object.assign(diagram.nodes[idx], changes);
+        const node = idx >= 0 ? diagram.nodes[idx] : undefined;
+        if (node) {
+          Object.assign(node, changes);
         }
       }
       break;
@@ -493,7 +489,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     case 'DiagramEdgeAdded': {
       const { diagramId, edge } = payload;
       if (project.diagrams[diagramId]) {
-        project.diagrams[diagramId].edges.push(edge as any);
+        project.diagrams[diagramId].edges.push(edge);
       }
       break;
     }
@@ -502,8 +498,9 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       const diagram = project.diagrams[diagramId];
       if (diagram) {
         const idx = diagram.edges.findIndex(e => e.id === edgeId);
-        if (idx >= 0) {
-          Object.assign(diagram.edges[idx], changes);
+        const edge = idx >= 0 ? diagram.edges[idx] : undefined;
+        if (edge) {
+          Object.assign(edge, changes);
         }
       }
       break;
@@ -519,7 +516,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     case 'DiagramLayoutApplied': {
       const { diagramId, layout, seed } = payload;
       if (project.diagrams[diagramId]) {
-        project.diagrams[diagramId].layout = layout as any;
+        project.diagrams[diagramId].layout = layout;
         project.diagrams[diagramId].layoutSeed = seed;
         project.diagrams[diagramId].specVersion += 1;
       }
@@ -585,19 +582,21 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'DecisionRejected': {
-      const { decisionId, reason, actorId } = payload;
+      const { decisionId } = payload;
       if (project.decisions[decisionId]) {
         project.decisions[decisionId].status = 'rejected';
       }
       break;
     }
     case 'DecisionStaled': {
-      const { decisionId, reason } = payload;
-      if (project.decisions[decisionId]) {
-        project.decisions[decisionId].status = 'stale';
-        for (const objId of project.decisions[decisionId].targetObjectIds) {
-          if (project.objects[objId] && project.objects[objId].approval === 'approved') {
-            project.objects[objId].approval = 'stale';
+      const { decisionId } = payload;
+      const staledDecision = project.decisions[decisionId];
+      if (staledDecision) {
+        staledDecision.status = 'stale';
+        for (const objId of staledDecision.targetObjectIds) {
+          const obj = project.objects[objId];
+          if (obj?.approval === 'approved') {
+            obj.approval = 'stale';
           }
         }
       }
@@ -631,9 +630,10 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'FindingReopened': {
-      const { findingId, reason } = payload;
-      if (project.findings[findingId]) {
-        project.findings[findingId].status = 'open';
+      const { findingId } = payload;
+      const finding = project.findings[findingId];
+      if (finding) {
+        finding.status = 'open';
       }
       break;
     }
@@ -652,6 +652,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     case 'DocumentLocked': {
       project.status = 'locked';
       for (const page of Object.values(project.pages)) {
+        if (!page) continue;
         page.status = 'locked';
       }
       break;
@@ -659,6 +660,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     case 'DocumentUnlocked': {
       project.status = 'review';
       for (const page of Object.values(project.pages)) {
+        if (!page) continue;
         page.status = 'review';
       }
       break;
@@ -680,18 +682,19 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'ExportManifestApproved': {
-      const { exportJobId, actorId, approvalToken } = payload;
-      if (project.exportJobs[exportJobId]) {
-        project.exportJobs[exportJobId].status = 'approved';
-        project.exportJobs[exportJobId].approvalToken = approvalToken;
-        project.exportJobs[exportJobId].approvedVersion = project.currentVersion;
+      const { exportJobId, approvalToken } = payload;
+      const exportJob = project.exportJobs[exportJobId];
+      if (exportJob) {
+        exportJob.status = 'approved';
+        exportJob.approvalToken = approvalToken;
+        exportJob.approvedVersion = project.currentVersion;
       }
       break;
     }
     case 'SnapshotCreated': {
       const { version, snapshotHash, eventCount } = payload;
       project.versions.push({
-        id: `ver_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as any,
+        id: createVersionId(),
         version,
         snapshotHash,
         eventCount,
@@ -742,17 +745,35 @@ function isWriteCommand(type: string): boolean {
 }
 
 function isApprovalCommand(type: string): boolean {
-  return type === 'ApproveDecision' || type === 'ApproveExportManifest' || type === 'ConfirmReadiness' || type === 'LockDocument';
+  return (
+    type === 'ApproveDecision' ||
+    type === 'ApproveExportManifest' ||
+    type === 'ConfirmReadiness' ||
+    type === 'LockDocument'
+  );
 }
 
-function computeHmac(event: DomainEvent): string {
-  // Placeholder - real implementation in storage layer with session secret
-  return '0'.repeat(64);
+/**
+ * Placeholder HMAC.
+ *
+ * The real chain is computed in `@vistect/storage` using the per-session secret
+ * derived via Web Crypto (`deriveSessionSecret`), because this package is pure
+ * and must not hold key material. The storage layer overwrites this value on
+ * append; it is a fixed sentinel so an unstamped event is visibly wrong rather
+ * than plausibly valid.
+ */
+const UNSTAMPED_HMAC = '0'.repeat(64);
+
+function stampPendingHmac(event: DomainEvent): EventEnvelope {
+  return { ...event, hmac: UNSTAMPED_HMAC };
 }
 
 // ============================================================================
-// Exports
+// Re-exports
 // ============================================================================
+//
+// Command and error types live in `../commands`; re-exported here so consumers
+// can import the whole write path from one module.
 
 export type {
   Command,
@@ -764,7 +785,4 @@ export type {
   NotFoundError,
   RateLimitedError,
   SchemaValidationError,
-  CommandBus,
-  CommandHandler,
-  CommandHandlerContext,
-};
+} from '../commands';

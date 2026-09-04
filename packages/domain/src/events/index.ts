@@ -1,10 +1,53 @@
 // ============================================================================
 // Domain Events
 // ============================================================================
+//
+// Payload schemas compose the *same* schemas as the aggregate model rather than
+// `z.unknown()`, so a replayed event is validated as strictly as the state it
+// rebuilds. `z.unknown()` here would let a corrupted or tampered event pass
+// validation and only fail later during projection.
 
-import { z } from 'zod';
 import { nanoid } from 'nanoid';
-import type { JsonValue } from 'type-fest';
+import { z } from 'zod';
+
+import {
+  ActorId,
+  ApprovalStateSchema,
+  AssetId,
+  ChartId,
+  ChartSchema,
+  CropSpecSchema,
+  DatasetId,
+  DatasetSchema,
+  DecisionId,
+  DiagramEdgeSchema,
+  DiagramId,
+  DiagramLayoutSchema,
+  DiagramNodeSchema,
+  DiagramSchema,
+  DocumentObjectSchema,
+  DocumentTypeSchema,
+  EdgeId,
+  ExportJobId,
+  ExportJobSchema,
+  FindingId,
+  HashSchema,
+  ImageAssetSchema,
+  IntentContractSchema,
+  InterpretationSchema,
+  NodeId,
+  ObjectId,
+  ObservationSchema,
+  OptionId,
+  PageId,
+  PageStatusSchema,
+  PageTemplateSchema,
+  ProjectId,
+  ThemeSchema,
+  UncertaintySchema,
+  ValidationFindingSchema,
+  VisualDecisionSchema,
+} from '../schema';
 
 // Re-export all schema types
 export * from '../schema';
@@ -32,13 +75,13 @@ export type EventBase = z.infer<typeof EventBaseSchema>;
 // Project Events
 export const ProjectCreatedPayloadSchema = z.object({
   project: z.object({
-    id: z.string(),
+    id: ProjectId,
     title: z.string(),
     language: z.string(),
-    documentType: z.string(),
-    intentContract: z.unknown(),
-    theme: z.unknown(),
-    actorId: z.string(),
+    documentType: DocumentTypeSchema,
+    intentContract: IntentContractSchema,
+    theme: ThemeSchema,
+    actorId: ActorId,
   }),
 });
 
@@ -49,238 +92,239 @@ export const ProjectUpdatedPayloadSchema = z.object({
 export const ProjectDeletedPayloadSchema = z.object({});
 
 export const ProjectEncryptedPayloadSchema = z.object({
-  keyHash: z.string().length(64),
+  keyHash: HashSchema,
 });
 
 export const ProjectImportedPayloadSchema = z.object({
-  sourceHash: z.string().length(64),
+  sourceHash: HashSchema,
 });
 
 // Page Events
 export const PageCreatedPayloadSchema = z.object({
-  pageId: z.string(),
-  template: z.string(),
-  insertAfter: z.string().optional(),
+  pageId: PageId,
+  template: PageTemplateSchema,
+  insertAfter: PageId.optional(),
 });
 
 export const PageUpdatedPayloadSchema = z.object({
-  pageId: z.string(),
+  pageId: PageId,
   changes: z.record(z.unknown()),
 });
 
 export const PageDeletedPayloadSchema = z.object({
-  pageId: z.string(),
+  pageId: PageId,
 });
 
 export const PageReorderedPayloadSchema = z.object({
-  pageOrder: z.array(z.string()),
+  pageOrder: z.array(PageId),
 });
 
 export const PageStatusChangedPayloadSchema = z.object({
-  pageId: z.string(),
-  oldStatus: z.string(),
-  newStatus: z.string(),
+  pageId: PageId,
+  oldStatus: PageStatusSchema,
+  newStatus: PageStatusSchema,
 });
 
 // Object Events
 export const ObjectCreatedPayloadSchema = z.object({
-  object: z.unknown(),
+  object: DocumentObjectSchema,
 });
 
 export const ObjectUpdatedPayloadSchema = z.object({
-  objectId: z.string(),
+  objectId: ObjectId,
   changes: z.record(z.unknown()),
 });
 
 export const ObjectDeletedPayloadSchema = z.object({
-  objectId: z.string(),
-  pageId: z.string(),
+  objectId: ObjectId,
+  pageId: PageId,
 });
 
 export const ObjectMovedPayloadSchema = z.object({
-  objectId: z.string(),
-  fromPageId: z.string(),
-  toPageId: z.string(),
-  insertAfter: z.string().optional(),
+  objectId: ObjectId,
+  fromPageId: PageId,
+  toPageId: PageId,
+  // Sibling object to insert after within the destination page's reading order.
+  insertAfter: ObjectId.optional(),
 });
 
 export const ObjectReadingOrderChangedPayloadSchema = z.object({
-  pageId: z.string(),
-  readingOrder: z.array(z.string()),
+  pageId: PageId,
+  readingOrder: z.array(ObjectId),
 });
 
 export const ObjectApprovalChangedPayloadSchema = z.object({
-  objectId: z.string(),
-  oldStatus: z.string(),
-  newStatus: z.string(),
-  actorId: z.string(),
-  decisionId: z.string().optional(),
+  objectId: ObjectId,
+  oldStatus: ApprovalStateSchema,
+  newStatus: ApprovalStateSchema,
+  actorId: ActorId,
+  decisionId: DecisionId.optional(),
 });
 
 // Asset Events
 export const AssetUploadedPayloadSchema = z.object({
-  asset: z.unknown(),
+  asset: ImageAssetSchema,
 });
 
 export const AssetUpdatedPayloadSchema = z.object({
-  assetId: z.string(),
+  assetId: AssetId,
   changes: z.record(z.unknown()),
 });
 
 export const AssetDeletedPayloadSchema = z.object({
-  assetId: z.string(),
+  assetId: AssetId,
 });
 
 export const AssetCropRegisteredPayloadSchema = z.object({
-  assetId: z.string(),
-  crop: z.unknown(),
+  assetId: AssetId,
+  crop: CropSpecSchema,
 });
 
 export const AssetAnalysisRecordedPayloadSchema = z.object({
-  assetId: z.string(),
-  observations: z.array(z.unknown()),
-  interpretations: z.array(z.unknown()),
-  uncertainties: z.array(z.unknown()),
+  assetId: AssetId,
+  observations: z.array(ObservationSchema),
+  interpretations: z.array(InterpretationSchema),
+  uncertainties: z.array(UncertaintySchema),
 });
 
 // Dataset Events
 export const DatasetCreatedPayloadSchema = z.object({
-  dataset: z.unknown(),
+  dataset: DatasetSchema,
 });
 
 export const DatasetUpdatedPayloadSchema = z.object({
-  datasetId: z.string(),
+  datasetId: DatasetId,
   changes: z.record(z.unknown()),
 });
 
 export const DatasetDeletedPayloadSchema = z.object({
-  datasetId: z.string(),
+  datasetId: DatasetId,
 });
 
 export const DatasetSchemaConfirmedPayloadSchema = z.object({
-  datasetId: z.string(),
+  datasetId: DatasetId,
 });
 
 // Diagram Events
 export const DiagramCreatedPayloadSchema = z.object({
-  diagram: z.unknown(),
+  diagram: DiagramSchema,
 });
 
 export const DiagramUpdatedPayloadSchema = z.object({
-  diagramId: z.string(),
+  diagramId: DiagramId,
   changes: z.record(z.unknown()),
 });
 
 export const DiagramDeletedPayloadSchema = z.object({
-  diagramId: z.string(),
+  diagramId: DiagramId,
 });
 
 export const DiagramNodeAddedPayloadSchema = z.object({
-  diagramId: z.string(),
-  node: z.unknown(),
+  diagramId: DiagramId,
+  node: DiagramNodeSchema,
 });
 
 export const DiagramNodeUpdatedPayloadSchema = z.object({
-  diagramId: z.string(),
-  nodeId: z.string(),
+  diagramId: DiagramId,
+  nodeId: NodeId,
   changes: z.record(z.unknown()),
 });
 
 export const DiagramNodeRemovedPayloadSchema = z.object({
-  diagramId: z.string(),
-  nodeId: z.string(),
+  diagramId: DiagramId,
+  nodeId: NodeId,
 });
 
 export const DiagramEdgeAddedPayloadSchema = z.object({
-  diagramId: z.string(),
-  edge: z.unknown(),
+  diagramId: DiagramId,
+  edge: DiagramEdgeSchema,
 });
 
 export const DiagramEdgeUpdatedPayloadSchema = z.object({
-  diagramId: z.string(),
-  edgeId: z.string(),
+  diagramId: DiagramId,
+  edgeId: EdgeId,
   changes: z.record(z.unknown()),
 });
 
 export const DiagramEdgeRemovedPayloadSchema = z.object({
-  diagramId: z.string(),
-  edgeId: z.string(),
+  diagramId: DiagramId,
+  edgeId: EdgeId,
 });
 
 export const DiagramLayoutAppliedPayloadSchema = z.object({
-  diagramId: z.string(),
-  layout: z.string(),
-  seed: z.number(),
+  diagramId: DiagramId,
+  layout: DiagramLayoutSchema,
+  seed: z.number().int(),
 });
 
 // Chart Events
 export const ChartCreatedPayloadSchema = z.object({
-  chart: z.unknown(),
+  chart: ChartSchema,
 });
 
 export const ChartUpdatedPayloadSchema = z.object({
-  chartId: z.string(),
+  chartId: ChartId,
   changes: z.record(z.unknown()),
 });
 
 export const ChartDeletedPayloadSchema = z.object({
-  chartId: z.string(),
+  chartId: ChartId,
 });
 
 export const ChartSpecVersionBumpedPayloadSchema = z.object({
-  chartId: z.string(),
+  chartId: ChartId,
   oldVersion: z.number(),
   newVersion: z.number(),
 });
 
 // Decision Events
 export const DecisionCreatedPayloadSchema = z.object({
-  decision: z.unknown(),
+  decision: VisualDecisionSchema,
 });
 
 export const DecisionUpdatedPayloadSchema = z.object({
-  decisionId: z.string(),
+  decisionId: DecisionId,
   changes: z.record(z.unknown()),
 });
 
 export const DecisionApprovedPayloadSchema = z.object({
-  decisionId: z.string(),
-  selectedOptionId: z.string(),
+  decisionId: DecisionId,
+  selectedOptionId: OptionId,
   reason: z.string().optional(),
-  actorId: z.string(),
+  actorId: ActorId,
 });
 
 export const DecisionRejectedPayloadSchema = z.object({
-  decisionId: z.string(),
+  decisionId: DecisionId,
   reason: z.string(),
-  actorId: z.string(),
+  actorId: ActorId,
 });
 
 export const DecisionStaledPayloadSchema = z.object({
-  decisionId: z.string(),
+  decisionId: DecisionId,
   reason: z.string(),
 });
 
 // Finding Events
 export const FindingCreatedPayloadSchema = z.object({
-  finding: z.unknown(),
+  finding: ValidationFindingSchema,
 });
 
 export const FindingResolvedPayloadSchema = z.object({
-  findingId: z.string(),
+  findingId: FindingId,
 });
 
 export const FindingAcceptedPayloadSchema = z.object({
-  findingId: z.string(),
+  findingId: FindingId,
   reason: z.string(),
 });
 
 export const FindingDismissedPayloadSchema = z.object({
-  findingId: z.string(),
+  findingId: FindingId,
 });
 
 export const FindingReopenedPayloadSchema = z.object({
-  findingId: z.string(),
+  findingId: FindingId,
   reason: z.string(),
 });
 
@@ -289,32 +333,32 @@ export const ReviewRequestedPayloadSchema = z.object({});
 export const AllPagesApprovedPayloadSchema = z.object({});
 export const ReadinessConfirmedPayloadSchema = z.object({});
 export const DocumentLockedPayloadSchema = z.object({
-  manifestHash: z.string().length(64),
+  manifestHash: HashSchema,
 });
 export const DocumentUnlockedPayloadSchema = z.object({});
 export const ExportFinalizedPayloadSchema = z.object({
-  exportJobId: z.string(),
-  manifestHash: z.string().length(64),
+  exportJobId: ExportJobId,
+  manifestHash: HashSchema,
 });
 
 // Export Events
 export const ExportJobCreatedPayloadSchema = z.object({
-  exportJob: z.unknown(),
+  exportJob: ExportJobSchema,
 });
 export const ExportJobUpdatedPayloadSchema = z.object({
-  exportJobId: z.string(),
+  exportJobId: ExportJobId,
   changes: z.record(z.unknown()),
 });
 export const ExportManifestApprovedPayloadSchema = z.object({
-  exportJobId: z.string(),
-  actorId: z.string(),
+  exportJobId: ExportJobId,
+  actorId: ActorId,
   approvalToken: z.string(),
 });
 
 // Version/Snapshot Events
 export const SnapshotCreatedPayloadSchema = z.object({
   version: z.number().int().nonnegative(),
-  snapshotHash: z.string().length(64),
+  snapshotHash: HashSchema,
   eventCount: z.number().int().nonnegative(),
 });
 export const UndoPerformedPayloadSchema = z.object({
@@ -324,9 +368,9 @@ export const UndoPerformedPayloadSchema = z.object({
 
 // Privacy Events
 export const PrivacyReceiptCreatedPayloadSchema = z.object({
-  receiptId: z.string(),
+  receiptId: z.string().min(1),
   processingType: z.enum(['local', 'remote']),
-  assetIds: z.array(z.string()).optional(),
+  assetIds: z.array(AssetId).optional(),
   regionDescription: z.string().optional(),
   consentGiven: z.boolean(),
   retentionStatus: z.enum(['retained', 'deleted', 'pending']),
@@ -347,7 +391,15 @@ export const AgentToolExecutedPayloadSchema = z.object({
 // Full Event Schemas (Base + Payload)
 // ============================================================================
 
-const createEventSchema = <T extends z.ZodTypeAny>(type: string, payloadSchema: T) =>
+/**
+ * Builds an event schema from a literal type tag and its payload schema.
+ *
+ * `T extends string` must be inferred as the *literal* (e.g. `'PageCreated'`),
+ * not widened to `string` — otherwise `z.literal(type)` produces
+ * `ZodLiteral<string>` for every member and `z.discriminatedUnion` collapses,
+ * making every payload resolve to `never`.
+ */
+const createEventSchema = <const T extends string, P extends z.ZodTypeAny>(type: T, payloadSchema: P) =>
   EventBaseSchema.extend({
     type: z.literal(type),
     payload: payloadSchema,
@@ -514,19 +566,33 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
 
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 
-// Alias for storage
-export type EventEnvelope = EventBase & { payload: JsonValue };
+/** Event discriminator, e.g. `'PageCreated' | 'DecisionApproved' | …`. */
+export type DomainEventType = DomainEvent['type'];
+
+/** Payload type for one specific event type. */
+export type EventPayloadFor<T extends DomainEventType> = Extract<DomainEvent, { type: T }>['payload'];
+
+/**
+ * A persisted event as the storage layer sees it.
+ *
+ * Identical to {@link DomainEvent}; the alias exists so `packages/storage` can
+ * name what it writes without depending on the union's internal structure. It
+ * was previously `EventBase & { payload: JsonValue }`, which required the
+ * `type-fest` dependency (never installed) and erased the type→payload link
+ * that makes replay type-safe.
+ */
+export type EventEnvelope = DomainEvent;
 
 // ============================================================================
 // Event Factory Function
 // ============================================================================
 
-export function createEvent<T extends DomainEvent['type']>(
+export function createEvent<T extends DomainEventType>(
   type: T,
   projectId: string,
   version: number,
   actorId: string,
-  payload: z.infer<typeof DomainEventSchema> extends { type: T; payload: infer P } ? P : never
+  payload: EventPayloadFor<T>
 ): DomainEvent {
   return {
     id: `evt_${nanoid(16)}`,
@@ -543,42 +609,50 @@ export function createEvent<T extends DomainEvent['type']>(
 // ============================================================================
 // Event Factory Functions (Typed)
 // ============================================================================
+//
+// Thin wrappers over `createEvent` that name their payload fields. Parameter
+// types derive from the event union via `EventPayloadFor`, so id parameters keep
+// their brands and a schema change surfaces here as a compile error.
+
+type PayloadOf<T extends DomainEventType> = EventPayloadFor<T>;
 
 export const createProjectCreatedEvent = (
   projectId: string,
   actorId: string,
-  project: {
-    id: string;
-    title: string;
-    language: string;
-    documentType: string;
-    intentContract: unknown;
-    theme: unknown;
-    actorId: string;
-  }
+  project: PayloadOf<'ProjectCreated'>['project']
 ) => createEvent('ProjectCreated', projectId, 1, actorId, { project });
 
 export const createPageCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  pageId: string,
-  template: string,
-  insertAfter?: string
+  pageId: PayloadOf<'PageCreated'>['pageId'],
+  template: PayloadOf<'PageCreated'>['template'],
+  insertAfter?: PayloadOf<'PageCreated'>['insertAfter']
 ) => createEvent('PageCreated', projectId, version, actorId, { pageId, template, insertAfter });
+
+export const createPageStatusChangedEvent = (
+  projectId: string,
+  version: number,
+  actorId: string,
+  pageId: PayloadOf<'PageStatusChanged'>['pageId'],
+  oldStatus: PayloadOf<'PageStatusChanged'>['oldStatus'],
+  newStatus: PayloadOf<'PageStatusChanged'>['newStatus']
+) =>
+  createEvent('PageStatusChanged', projectId, version, actorId, { pageId, oldStatus, newStatus });
 
 export const createObjectCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  object: z.infer<typeof import('../schema').DocumentObjectSchema>
+  object: PayloadOf<'ObjectCreated'>['object']
 ) => createEvent('ObjectCreated', projectId, version, actorId, { object });
 
 export const createObjectUpdatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  objectId: string,
+  objectId: PayloadOf<'ObjectUpdated'>['objectId'],
   changes: Record<string, unknown>
 ) => createEvent('ObjectUpdated', projectId, version, actorId, { objectId, changes });
 
@@ -586,39 +660,102 @@ export const createObjectDeletedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  objectId: string,
-  pageId: string
+  objectId: PayloadOf<'ObjectDeleted'>['objectId'],
+  pageId: PayloadOf<'ObjectDeleted'>['pageId']
 ) => createEvent('ObjectDeleted', projectId, version, actorId, { objectId, pageId });
+
+export const createObjectApprovalChangedEvent = (
+  projectId: string,
+  version: number,
+  actorId: PayloadOf<'ObjectApprovalChanged'>['actorId'],
+  objectId: PayloadOf<'ObjectApprovalChanged'>['objectId'],
+  oldStatus: PayloadOf<'ObjectApprovalChanged'>['oldStatus'],
+  newStatus: PayloadOf<'ObjectApprovalChanged'>['newStatus'],
+  decisionId?: PayloadOf<'ObjectApprovalChanged'>['decisionId']
+) =>
+  createEvent('ObjectApprovalChanged', projectId, version, actorId, {
+    objectId,
+    oldStatus,
+    newStatus,
+    actorId,
+    decisionId,
+  });
 
 export const createAssetUploadedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  asset: z.infer<typeof import('../schema').ImageAssetSchema>
+  asset: PayloadOf<'AssetUploaded'>['asset']
 ) => createEvent('AssetUploaded', projectId, version, actorId, { asset });
+
+export const createAssetCropRegisteredEvent = (
+  projectId: string,
+  version: number,
+  actorId: string,
+  assetId: PayloadOf<'AssetCropRegistered'>['assetId'],
+  crop: PayloadOf<'AssetCropRegistered'>['crop']
+) => createEvent('AssetCropRegistered', projectId, version, actorId, { assetId, crop });
 
 export const createDecisionCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  decision: z.infer<typeof import('../schema').VisualDecisionSchema>
+  decision: PayloadOf<'DecisionCreated'>['decision']
 ) => createEvent('DecisionCreated', projectId, version, actorId, { decision });
 
 export const createDecisionApprovedEvent = (
   projectId: string,
   version: number,
-  actorId: string,
-  decisionId: string,
-  selectedOptionId: string,
+  actorId: PayloadOf<'DecisionApproved'>['actorId'],
+  decisionId: PayloadOf<'DecisionApproved'>['decisionId'],
+  selectedOptionId: PayloadOf<'DecisionApproved'>['selectedOptionId'],
   reason: string | undefined
-) => createEvent('DecisionApproved', projectId, version, actorId, { decisionId, selectedOptionId, reason, actorId });
+) =>
+  createEvent('DecisionApproved', projectId, version, actorId, {
+    decisionId,
+    selectedOptionId,
+    reason,
+    actorId,
+  });
+
+export const createDecisionRejectedEvent = (
+  projectId: string,
+  version: number,
+  actorId: PayloadOf<'DecisionRejected'>['actorId'],
+  decisionId: PayloadOf<'DecisionRejected'>['decisionId'],
+  reason: string
+) => createEvent('DecisionRejected', projectId, version, actorId, { decisionId, reason, actorId });
+
+export const createDecisionStaledEvent = (
+  projectId: string,
+  version: number,
+  actorId: string,
+  decisionId: PayloadOf<'DecisionStaled'>['decisionId'],
+  reason: string
+) => createEvent('DecisionStaled', projectId, version, actorId, { decisionId, reason });
+
+export const createDecisionUpdatedEvent = (
+  projectId: string,
+  version: number,
+  actorId: string,
+  decisionId: PayloadOf<'DecisionUpdated'>['decisionId'],
+  changes: Record<string, unknown>
+) => createEvent('DecisionUpdated', projectId, version, actorId, { decisionId, changes });
 
 export const createFindingCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  finding: z.infer<typeof import('../schema').ValidationFindingSchema>
+  finding: PayloadOf<'FindingCreated'>['finding']
 ) => createEvent('FindingCreated', projectId, version, actorId, { finding });
+
+export const createFindingReopenedEvent = (
+  projectId: string,
+  version: number,
+  actorId: string,
+  findingId: PayloadOf<'FindingReopened'>['findingId'],
+  reason: string
+) => createEvent('FindingReopened', projectId, version, actorId, { findingId, reason });
 
 export const createAgentToolExecutedEvent = (
   projectId: string,
@@ -631,12 +768,13 @@ export const createAgentToolExecutedEvent = (
   versionBefore: number,
   versionAfter: number,
   durationMs: number
-) => createEvent('AgentToolExecuted', projectId, version, actorId, {
-  toolName,
-  input,
-  result,
-  status,
-  versionBefore,
-  versionAfter,
-  durationMs,
-});
+) =>
+  createEvent('AgentToolExecuted', projectId, version, actorId, {
+    toolName,
+    input,
+    result,
+    status,
+    versionBefore,
+    versionAfter,
+    durationMs,
+  });

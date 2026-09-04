@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
+
 import {
   checkI01,
   checkI02,
@@ -17,7 +18,16 @@ import {
   checkI15,
   checkAll,
 } from '../src/invariants';
-import type { DocumentProject, DocumentObject, Page, ValidationFinding, VisualDecision, ApprovalState, FindingStatus, FindingSeverity, DocumentStatus, PageStatus, Actor, ActorKind } from '../src/schema';
+import type {
+  ApprovalState,
+  DocumentObject,
+  DocumentProject,
+  ExportJobId,
+  ObjectId,
+  Page,
+  ValidationFinding,
+  VisualDecision,
+} from '../src/schema';
 
 // ============================================================================
 // Test Helpers
@@ -28,7 +38,7 @@ const createMockProject = (overrides: Partial<DocumentProject> = {}): DocumentPr
   title: 'Test Project',
   language: 'en',
   documentType: 'impact-report',
-  status: 'draft' as DocumentStatus,
+  status: 'draft',
   intentContract: {
     documentType: 'impact-report',
     purpose: 'Test',
@@ -66,7 +76,15 @@ const createMockProject = (overrides: Partial<DocumentProject> = {}): DocumentPr
   ...overrides,
 });
 
-const createMockObject = (overrides: Partial<DocumentObject> = {}): DocumentObject => ({
+/**
+ * Builds a document object fixture.
+ *
+ * `overrides` is loosely typed and the result is cast: `DocumentObject` is a
+ * discriminated union, so a partial spread cannot satisfy any single member, and
+ * fixtures deliberately construct partial shapes to exercise validation.
+ */
+const createMockObject = (overrides: Record<string, unknown> = {}): DocumentObject =>
+  ({
   id: 'obj_test123' as any,
   role: 'paragraph',
   kind: 'text',
@@ -75,10 +93,7 @@ const createMockObject = (overrides: Partial<DocumentObject> = {}): DocumentObje
   constraints: [],
   layer: 0,
   readingOrderIndex: 0,
-  accessibility: {
-    isDecorative: false,
-    includedInReadingOrder: true,
-  },
+  accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
   provenance: {
     sourceType: 'user',
     actorId: 'act_test123' as any,
@@ -86,15 +101,16 @@ const createMockObject = (overrides: Partial<DocumentObject> = {}): DocumentObje
   },
   approval: 'unreviewed' as ApprovalState,
   createdBy: 'act_test123' as any,
-  versionCreated: 1,
-  versionModified: 1,
-  ...overrides,
-});
+    content: 'Test content',
+    versionCreated: 1,
+    versionModified: 1,
+    ...overrides,
+  }) as DocumentObject;
 
 const createMockPage = (overrides: Partial<Page> = {}): Page => ({
   id: 'pg_test123' as any,
   template: 'text-led',
-  status: 'draft' as PageStatus,
+  status: 'draft',
   objects: [],
   readingOrder: [],
   createdAt: new Date().toISOString(),
@@ -108,13 +124,13 @@ const createMockFinding = (overrides: Partial<ValidationFinding> = {}): Validati
   id: 'fnd_test123' as any,
   scope: 'object',
   targetId: 'obj_test123' as any,
-  category: 'layout.overlap' as FindingCategory,
-  severity: 'error' as FindingSeverity,
-  evidenceType: 'deterministic' as any,
+  category: 'layout.overlap',
+  severity: 'error',
+  evidenceType: 'deterministic',
   summary: 'Test finding',
   evidence: [],
   suggestedActions: [],
-  status: 'open' as FindingStatus,
+  status: 'open',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   ...overrides,
@@ -122,7 +138,7 @@ const createMockFinding = (overrides: Partial<ValidationFinding> = {}): Validati
 
 const createMockDecision = (overrides: Partial<VisualDecision> = {}): VisualDecision => ({
   id: 'dec_test123' as any,
-  category: 'image_selection' as any,
+  category: 'image_selection',
   targetObjectIds: [],
   targetPageIds: [],
   status: 'proposed',
@@ -223,7 +239,10 @@ describe('Domain Invariants', () => {
         status: 'locked',
         pages: { [page.id]: page },
       });
-      expect(checkI05(project)).toContain('locked but document is locked');
+      const violation = checkI05(project);
+      expect(violation).not.toBeNull();
+      expect(violation).toContain(page.id);
+      expect(violation).toContain('document is locked');
     });
 
     it('passes when document and page both locked', () => {
@@ -268,12 +287,12 @@ describe('Domain Invariants', () => {
 
   describe('I-09: Reading order consistency', () => {
     it('passes when reading order matches included objects', () => {
-      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true } });
-      const obj2 = createMockObject({ id: 'obj_2' as any, accessibility: { isDecorative: false, includedInReadingOrder: true } });
+      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
+      const obj2 = createMockObject({ id: 'obj_2' as any, accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
       const page = createMockPage({
         id: 'pg_1' as any,
-        objects: ['obj_1', 'obj_2'],
-        readingOrder: ['obj_1', 'obj_2'],
+        objects: ['obj_1' as ObjectId, 'obj_2' as ObjectId],
+        readingOrder: ['obj_1' as ObjectId, 'obj_2' as ObjectId],
       });
       const project = createMockProject({
         pages: { [page.id]: page },
@@ -283,11 +302,11 @@ describe('Domain Invariants', () => {
     });
 
     it('fails when reading order has extra object', () => {
-      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true } });
+      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
       const page = createMockPage({
         id: 'pg_1' as any,
-        objects: ['obj_1'],
-        readingOrder: ['obj_1', 'obj_2'],
+        objects: ['obj_1' as ObjectId],
+        readingOrder: ['obj_1' as ObjectId, 'obj_2' as ObjectId],
       });
       const project = createMockProject({
         pages: { [page.id]: page },
@@ -297,11 +316,11 @@ describe('Domain Invariants', () => {
     });
 
     it('fails when reading order has duplicate', () => {
-      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true } });
+      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
       const page = createMockPage({
         id: 'pg_1' as any,
-        objects: ['obj_1'],
-        readingOrder: ['obj_1', 'obj_1'],
+        objects: ['obj_1' as ObjectId],
+        readingOrder: ['obj_1' as ObjectId, 'obj_1' as ObjectId],
       });
       const project = createMockProject({
         pages: { [page.id]: page },
@@ -311,24 +330,26 @@ describe('Domain Invariants', () => {
     });
 
     it('fails when included object missing from reading order', () => {
-      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true } });
-      const obj2 = createMockObject({ id: 'obj_2' as any, accessibility: { isDecorative: false, includedInReadingOrder: true } });
+      const obj1 = createMockObject({ id: 'obj_1' as any, accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
+      const obj2 = createMockObject({ id: 'obj_2' as any, accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
       const page = createMockPage({
         id: 'pg_1' as any,
-        objects: ['obj_1', 'obj_2'],
-        readingOrder: ['obj_1'],
+        objects: ['obj_1' as ObjectId, 'obj_2' as ObjectId],
+        readingOrder: ['obj_1' as ObjectId],
       });
       const project = createMockProject({
         pages: { [page.id]: page },
         objects: { [obj1.id]: obj1, [obj2.id]: obj2 },
       });
-      expect(checkI09(project)).toContain('reading order') && expect(checkI09(project)).toContain('obj_2');
+      const violation = checkI09(project);
+      expect(violation).toContain('reading order');
+      expect(violation).toContain('obj_2');
     });
   });
 
   describe('I-10: Non-decorative objects require accessibility before document_ready', () => {
     it('passes for draft document', () => {
-      const obj = createMockObject({ kind: 'image', accessibility: { isDecorative: false, includedInReadingOrder: true } });
+      const obj = createMockObject({ kind: 'image', accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] } });
       const project = createMockProject({
         status: 'draft',
         objects: { [obj.id]: obj },
@@ -339,7 +360,7 @@ describe('Domain Invariants', () => {
     it('fails for document_ready with image missing alt text', () => {
       const obj = createMockObject({
         kind: 'image',
-        accessibility: { isDecorative: false, includedInReadingOrder: true },
+        accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
         altTextApproved: undefined,
       });
       const project = createMockProject({
@@ -352,7 +373,7 @@ describe('Domain Invariants', () => {
     it('passes for document_ready with approved alt text', () => {
       const obj = createMockObject({
         kind: 'image',
-        accessibility: { isDecorative: false, includedInReadingOrder: true },
+        accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
         altTextApproved: 'Test image',
       });
       const project = createMockProject({
@@ -365,7 +386,7 @@ describe('Domain Invariants', () => {
     it('passes for decorative images', () => {
       const obj = createMockObject({
         kind: 'image',
-        accessibility: { isDecorative: true, includedInReadingOrder: false },
+        accessibility: { isDecorative: true, includedInReadingOrder: false, warnings: [] },
       });
       const project = createMockProject({
         status: 'document_ready',
@@ -377,7 +398,7 @@ describe('Domain Invariants', () => {
     it('fails for chart missing alt text at document_ready', () => {
       const obj = createMockObject({
         kind: 'chart',
-        accessibility: { isDecorative: false, includedInReadingOrder: true },
+        accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
         chartId: 'ch_1' as any,
       });
       const project = createMockProject({
@@ -391,7 +412,7 @@ describe('Domain Invariants', () => {
     it('fails for diagram missing long description at document_ready', () => {
       const obj = createMockObject({
         kind: 'diagram',
-        accessibility: { isDecorative: false, includedInReadingOrder: true },
+        accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
         diagramId: 'dg_1' as any,
       });
       const project = createMockProject({
@@ -412,7 +433,7 @@ describe('Domain Invariants', () => {
     it('fails when export completed but manifest missing', () => {
       const project = createMockProject({
         exportJobs: {
-          'exp_1': {
+          ['exp_1' as ExportJobId]: {
             id: 'exp_1' as any,
             projectId: 'pj_test123' as any,
             status: 'completed',
@@ -429,7 +450,7 @@ describe('Domain Invariants', () => {
       const project = createMockProject({
         currentVersion: 5,
         exportJobs: {
-          'exp_1': {
+          ['exp_1' as ExportJobId]: {
             id: 'exp_1' as any,
             projectId: 'pj_test123' as any,
             status: 'completed',
@@ -450,7 +471,7 @@ describe('Domain Invariants', () => {
       });
       const project = createMockProject({
         exportJobs: {
-          'exp_1': {
+          ['exp_1' as ExportJobId]: {
             id: 'exp_1' as any,
             projectId: 'pj_test123' as any,
             status: 'completed',
@@ -462,7 +483,9 @@ describe('Domain Invariants', () => {
         },
         findings: { [finding.id]: finding },
       });
-      expect(checkI11(project)).toContain('blocking findings');
+      const violation = checkI11(project);
+      expect(violation).not.toBeNull();
+      expect(violation).toContain('1 open blocking finding');
     });
   });
 
@@ -503,7 +526,7 @@ describe('Domain Invariants', () => {
     it('collects all violations', () => {
       const obj = createMockObject({
         kind: 'image',
-        accessibility: { isDecorative: false, includedInReadingOrder: true },
+        accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
       });
       const project = createMockProject({
         status: 'document_ready',

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import {
   canTransitionDocument,
   applyDocumentTransition,
@@ -14,18 +15,20 @@ import {
   applyExportTransition,
   computeStaleness,
 } from '../src/machines';
-import type { DocumentStatus, PageStatus, ApprovalState, VisualDecision, ValidationFinding, FindingStatus, FindingSeverity, Actor, ActorKind, DocumentObject, Diagram, Chart, Dataset, ImageAsset } from '../src/schema';
+import type {
+  ApprovalState,
+  Chart,
+  Dataset,
+  Diagram,
+  DocumentObject,
+  ObjectId,
+  ValidationFinding,
+  VisualDecision,
+} from '../src/schema';
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
-
-const createMockActor = (kind: ActorKind): Actor => ({
-  id: 'act_test' as any,
-  kind,
-  label: kind === 'human' ? 'You' : 'Agent',
-  agentOrigin: kind === 'browser_agent' ? 'https://chat.openai.com' : undefined,
-});
 
 // ============================================================================
 // Document Lifecycle Tests
@@ -483,7 +486,7 @@ describe('Staleness Computation', () => {
     scope: 'object',
     targetId: 'obj_1' as any,
     category: 'layout.overlap',
-    severity: 'error' as FindingSeverity,
+    severity: 'error',
     evidenceType: 'deterministic',
     summary: 'Test',
     evidence: [],
@@ -494,7 +497,9 @@ describe('Staleness Computation', () => {
     ...overrides,
   });
 
-  const createMockObject = (overrides: Partial<DocumentObject> = {}): DocumentObject => ({
+  /** Loosely typed and cast: see the note in `invariants.test.ts`. */
+  const createMockObject = (overrides: Record<string, unknown> = {}): DocumentObject =>
+    ({
     id: 'obj_1' as any,
     role: 'paragraph',
     kind: 'text',
@@ -503,14 +508,15 @@ describe('Staleness Computation', () => {
     constraints: [],
     layer: 0,
     readingOrderIndex: 0,
-    accessibility: { isDecorative: false, includedInReadingOrder: true },
+    accessibility: { isDecorative: false, includedInReadingOrder: true, warnings: [] },
     provenance: { sourceType: 'user', actorId: 'act_1' as any, at: new Date().toISOString() },
     approval: 'approved' as ApprovalState,
     createdBy: 'act_1' as any,
-    versionCreated: 1,
-    versionModified: 1,
-    ...overrides,
-  });
+    content: 'Test content',
+      versionCreated: 1,
+      versionModified: 1,
+      ...overrides,
+    }) as DocumentObject;
 
   it('stales decision when approved object mutated', () => {
     const decision = createMockDecision({ id: 'dec_1' as any, status: 'approved', targetObjectIds: ['obj_1' as any] });
@@ -598,7 +604,7 @@ describe('Staleness Computation', () => {
   it('reopens resolved findings when target object becomes stale', () => {
     const decision = createMockDecision({ id: 'dec_1' as any, status: 'approved', targetObjectIds: ['obj_1' as any] });
     const obj = createMockObject({ id: 'obj_1' as any, approval: 'approved', decisionId: 'dec_1' as any });
-    const finding = createMockFinding({ id: 'fnd_1' as any, targetId: 'obj_1', status: 'resolved' });
+    const finding = createMockFinding({ id: 'fnd_1' as any, targetId: 'obj_1' as ObjectId, status: 'resolved' });
     const project = createMockProject({
       decisions: { [decision.id]: decision },
       objects: { [obj.id]: obj },
@@ -614,7 +620,7 @@ describe('Staleness Computation', () => {
   });
 
   it('does not reopen findings for unaffected objects', () => {
-    const finding = createMockFinding({ id: 'fnd_1' as any, targetId: 'obj_2', status: 'resolved' });
+    const finding = createMockFinding({ id: 'fnd_1' as any, targetId: 'obj_2' as ObjectId, status: 'resolved' });
     const project = createMockProject({
       findings: { [finding.id]: finding },
     });

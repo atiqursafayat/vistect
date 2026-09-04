@@ -1,5 +1,21 @@
 import { z } from 'zod';
-import type {
+
+// ============================================================================
+// Imports
+// ============================================================================
+//
+// Two distinct import groups, because command schemas need both:
+//
+//   1. VALUE imports — Zod schemas composed into command payload schemas at
+//      runtime. Branded id schemas (`ProjectId` etc.) intentionally export a
+//      const and a type under one name, so a value import supplies both.
+//   2. TYPE imports — used only in factory-function signatures.
+//
+// These were previously merged into one `import type { ... }`, which erased the
+// runtime bindings and produced TS1361/TS2693 at every payload definition.
+
+import {
+  // Branded id schemas (value + type)
   ProjectId,
   PageId,
   ObjectId,
@@ -9,89 +25,66 @@ import type {
   ChartId,
   DecisionId,
   FindingId,
-  VersionId,
   ActorId,
   ExportJobId,
-  DataColumnId,
   NodeId,
   EdgeId,
-  GroupId,
   OptionId,
-  Bounds,
-  RelativeConstraint,
-  AccessibilityMetadata,
-  ApprovalState,
-  Provenance,
-  Observation,
-  Interpretation,
-  Uncertainty,
-  Theme,
-  CropSpec,
-  FindingSeverity,
-  EvidenceType,
-  Hash,
-  ActorKind,
-  Actor,
-  DocumentType,
-  DocumentStatus,
-  PageStatus,
-  IntentContract,
-  PageTemplate,
-  Page,
-  ObjectRole,
-  ObjectKind,
-  TextObject,
-  ImageObject,
-  IconObject,
-  ChartObject,
-  DiagramObject,
-  TableObject,
-  ShapeObject,
-  DocumentObject,
+  // Enum / object schemas (value only — paired types imported below)
+  ApprovalStateSchema,
+  AssetSourceTypeSchema,
+  ChartSpecSchema,
+  CropSpecSchema,
+  DataColumnSchema,
+  DecisionCategorySchema,
+  DecisionOptionSchema,
+  DiagramEdgeSchema,
+  DiagramNodeSchema,
+  DiagramTypeSchema,
+  DocumentObjectSchema,
+  DocumentProjectSchema,
+  DocumentTypeSchema,
+  ExportManifestSchema,
+  HashSchema,
+  IntentContractSchema,
+  InterpretationSchema,
+  ObservationSchema,
+  PageStatusSchema,
+  PageTemplateSchema,
+  RelativeConstraintSchema,
+  ThemeSchema,
+  UncertaintySchema,
+  ValidationFindingSchema,
+} from '../schema';
+import type {
   AssetSourceType,
-  ImageAsset,
-  DataColumnType,
-  DataColumn,
-  Dataset,
-  DiagramType,
-  DiagramNode,
-  DiagramEdge,
-  DiagramGroup,
-  Diagram,
-  ChartType,
-  ChartAxis,
-  ChartSeries,
-  ChartSpec,
-  ChartGeometry,
-  Chart,
   DecisionCategory,
   DecisionOption,
-  VisualDecision,
-  FindingCategory,
-  FindingStatus,
-  SuggestedAction,
-  ValidationFinding,
-  DocumentVersion,
-  ExportManifest,
-  ExportJob,
-  DocumentProject,
-  isWriteTool,
-  isReadTool,
+  DocumentObject,
+  DocumentType,
+  Hash,
+  IntentContract,
+  PageTemplate,
+  Theme,
 } from '../schema';
-
-import type { DomainEvent } from '../events';
 
 // ============================================================================
 // Command Envelope
 // ============================================================================
+//
+// Every command carries transport metadata (`id`, `projectId`,
+// `expectedVersion`, `actorId`, `timestamp`) plus a `type`-discriminated
+// `payload`. The two halves are declared separately and intersected at the
+// bottom of this file, so that:
+//
+//   - narrowing on `command.type` yields the exact payload type, and
+//   - envelope fields stay in one place instead of being repeated 60+ times.
 
 export const CommandEnvelopeSchema = z.object({
   id: z.string().min(1),
-  type: z.string().min(1),
   projectId: ProjectId,
   expectedVersion: z.number().int().nonnegative(),
   actorId: ActorId,
-  payload: z.unknown(),
   timestamp: z.string().datetime({ offset: true }),
 });
 export type CommandEnvelope = z.infer<typeof CommandEnvelopeSchema>;
@@ -169,8 +162,8 @@ export const CreateProjectCommandSchema = z.object({
     title: z.string().min(1).max(200),
     language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/).default('en'),
     documentType: DocumentTypeSchema,
-    intentContract: z.unknown(), // IntentContract
-    theme: Theme,
+    intentContract: IntentContractSchema,
+    theme: ThemeSchema,
     actorId: ActorId,
   }),
 });
@@ -197,8 +190,8 @@ export const EncryptProjectCommandSchema = z.object({
 export const ImportProjectCommandSchema = z.object({
   type: z.literal('ImportProject'),
   payload: z.object({
-    projectData: z.unknown(), // serialized DocumentProject
-    sourceHash: Hash,
+    projectData: DocumentProjectSchema,
+    sourceHash: HashSchema,
   }),
 });
 
@@ -206,7 +199,7 @@ export const ImportProjectCommandSchema = z.object({
 export const CreatePageCommandSchema = z.object({
   type: z.literal('CreatePage'),
   payload: z.object({
-    template: PageTemplate,
+    template: PageTemplateSchema,
     insertAfter: PageId.optional(),
   }),
 });
@@ -237,7 +230,7 @@ export const ChangePageStatusCommandSchema = z.object({
   type: z.literal('ChangePageStatus'),
   payload: z.object({
     pageId: PageId,
-    newStatus: PageStatus,
+    newStatus: PageStatusSchema,
   }),
 });
 
@@ -245,7 +238,7 @@ export const ChangePageStatusCommandSchema = z.object({
 export const CreateObjectCommandSchema = z.object({
   type: z.literal('CreateObject'),
   payload: z.object({
-    object: z.unknown(), // DocumentObject
+    object: DocumentObjectSchema,
   }),
 });
 
@@ -277,7 +270,7 @@ export const SetObjectConstraintsCommandSchema = z.object({
   type: z.literal('SetObjectConstraints'),
   payload: z.object({
     objectId: ObjectId,
-    constraints: z.array(z.unknown()), // RelativeConstraint[]
+    constraints: z.array(RelativeConstraintSchema),
   }),
 });
 
@@ -293,7 +286,7 @@ export const ChangeObjectApprovalCommandSchema = z.object({
   type: z.literal('ChangeObjectApproval'),
   payload: z.object({
     objectId: ObjectId,
-    newStatus: ApprovalState,
+    newStatus: ApprovalStateSchema,
     actorId: ActorId,
     decisionId: DecisionId.optional(),
   }),
@@ -306,7 +299,7 @@ export const UploadAssetCommandSchema = z.object({
     fileName: z.string(),
     mimeType: z.string(),
     data: z.instanceof(Uint8Array), // or ArrayBuffer
-    sourceType: AssetSourceType,
+    sourceType: AssetSourceTypeSchema,
     sourceReference: z.string().optional(),
     license: z.string().optional(),
   }),
@@ -331,7 +324,7 @@ export const RegisterAssetCropCommandSchema = z.object({
   type: z.literal('RegisterAssetCrop'),
   payload: z.object({
     assetId: AssetId,
-    crop: CropSpec,
+    crop: CropSpecSchema,
   }),
 });
 
@@ -339,9 +332,9 @@ export const RecordAssetAnalysisCommandSchema = z.object({
   type: z.literal('RecordAssetAnalysis'),
   payload: z.object({
     assetId: AssetId,
-    observations: z.array(z.unknown()), // Observation[]
-    interpretations: z.array(z.unknown()), // Interpretation[]
-    uncertainties: z.array(z.unknown()), // Uncertainty[]
+    observations: z.array(ObservationSchema),
+    interpretations: z.array(InterpretationSchema),
+    uncertainties: z.array(UncertaintySchema),
   }),
 });
 
@@ -350,7 +343,7 @@ export const CreateDatasetCommandSchema = z.object({
   type: z.literal('CreateDataset'),
   payload: z.object({
     name: z.string(),
-    columns: z.array(z.unknown()), // DataColumn[]
+    columns: z.array(DataColumnSchema),
     source: z.enum(['csv_upload', 'manual_entry', 'pasted_table', 'extracted_table']),
     sourceReference: z.string().optional(),
   }),
@@ -382,7 +375,7 @@ export const ConfirmDatasetSchemaCommandSchema = z.object({
 export const CreateDiagramCommandSchema = z.object({
   type: z.literal('CreateDiagram'),
   payload: z.object({
-    type: DiagramType,
+    type: DiagramTypeSchema,
     layout: z.enum(['layered', 'force', 'hierarchical']).default('layered'),
     layoutSeed: z.number().int().default(42),
   }),
@@ -407,7 +400,7 @@ export const AddDiagramNodeCommandSchema = z.object({
   type: z.literal('AddDiagramNode'),
   payload: z.object({
     diagramId: DiagramId,
-    node: z.unknown(), // DiagramNode
+    node: DiagramNodeSchema,
   }),
 });
 
@@ -432,7 +425,7 @@ export const AddDiagramEdgeCommandSchema = z.object({
   type: z.literal('AddDiagramEdge'),
   payload: z.object({
     diagramId: DiagramId,
-    edge: z.unknown(), // DiagramEdge
+    edge: DiagramEdgeSchema,
   }),
 });
 
@@ -466,7 +459,7 @@ export const ApplyDiagramLayoutCommandSchema = z.object({
 export const CreateChartCommandSchema = z.object({
   type: z.literal('CreateChart'),
   payload: z.object({
-    spec: z.unknown(), // ChartSpec
+    spec: ChartSpecSchema,
   }),
 });
 
@@ -496,11 +489,11 @@ export const BumpChartSpecVersionCommandSchema = z.object({
 export const CreateDecisionCommandSchema = z.object({
   type: z.literal('CreateDecision'),
   payload: z.object({
-    category: DecisionCategory,
+    category: DecisionCategorySchema,
     targetObjectIds: z.array(ObjectId).default([]),
     targetPageIds: z.array(PageId).default([]),
     suggestedBy: ActorId,
-    options: z.array(z.unknown()).min(1), // DecisionOption[]
+    options: z.array(DecisionOptionSchema).min(1),
   }),
 });
 
@@ -542,7 +535,7 @@ export const RequestDecisionAlternativesCommandSchema = z.object({
 export const CreateFindingCommandSchema = z.object({
   type: z.literal('CreateFinding'),
   payload: z.object({
-    finding: z.unknown(), // ValidationFinding
+    finding: ValidationFindingSchema,
   }),
 });
 
@@ -582,7 +575,7 @@ export const ConfirmReadinessCommandSchema = z.object({
 export const LockDocumentCommandSchema = z.object({
   type: z.literal('LockDocument'),
   payload: z.object({
-    manifestHash: Hash,
+    manifestHash: HashSchema,
   }),
 });
 
@@ -603,7 +596,7 @@ export const FinalizeExportCommandSchema = z.object({
 export const CreateExportJobCommandSchema = z.object({
   type: z.literal('CreateExportJob'),
   payload: z.object({
-    manifest: z.unknown(), // ExportManifest
+    manifest: ExportManifestSchema,
   }),
 });
 
@@ -653,7 +646,7 @@ export const CreatePrivacyReceiptCommandSchema = z.object({
 // Union Type
 // ============================================================================
 
-export const CommandSchema = z.discriminatedUnion('type', [
+export const CommandPayloadSchema = z.discriminatedUnion('type', [
   CreateProjectCommandSchema,
   UpdateProjectCommandSchema,
   DeleteProjectCommandSchema,
@@ -716,27 +709,53 @@ export const CommandSchema = z.discriminatedUnion('type', [
   CreatePrivacyReceiptCommandSchema,
 ]);
 
+/** The `type`-discriminated payload half of a command, without envelope fields. */
+export type CommandPayload = z.infer<typeof CommandPayloadSchema>;
+
+/**
+ * Full command: envelope fields intersected with the discriminated payload.
+ *
+ * Narrowing on `.type` gives the precise `payload` shape, so handlers and
+ * factories are checked rather than relying on `z.unknown()`.
+ */
+export const CommandSchema = z.intersection(CommandEnvelopeSchema, CommandPayloadSchema);
 export type Command = z.infer<typeof CommandSchema>;
+
+/** Command discriminator, e.g. `'CreatePage' | 'ApproveDecision' | …`. */
+export type CommandType = CommandPayload['type'];
+
+/** Payload type for one specific command type. */
+export type PayloadFor<T extends CommandType> = Extract<CommandPayload, { type: T }>['payload'];
 
 // ============================================================================
 // Command Factory Functions
 // ============================================================================
 
-const createCommand = <T extends Command['type']>(
+/** Generates a command id. Uses `crypto.randomUUID` where available. */
+function createCommandId(): string {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  return `cmd_${random}`;
+}
+
+const createCommand = <T extends CommandType>(
   type: T,
   projectId: ProjectId,
   expectedVersion: number,
   actorId: ActorId,
-  payload: z.infer<typeof CommandSchema> extends { type: T; payload: infer P } ? P : never
-): Command => ({
-  id: `cmd_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`,
-  type,
-  projectId,
-  expectedVersion,
-  actorId,
-  payload,
-  timestamp: new Date().toISOString(),
-});
+  payload: PayloadFor<T>
+): Command =>
+  ({
+    id: createCommandId(),
+    projectId,
+    expectedVersion,
+    actorId,
+    timestamp: new Date().toISOString(),
+    type,
+    payload,
+  }) as Command;
 
 export const createCreateProjectCommand = (
   projectId: ProjectId,
@@ -784,7 +803,7 @@ export const createUploadAssetCommand = (
   actorId: ActorId,
   fileName: string,
   mimeType: string,
-  data: Uint8Array,
+  data: Uint8Array<ArrayBuffer>,
   sourceType: AssetSourceType,
   sourceReference?: string,
   license?: string
