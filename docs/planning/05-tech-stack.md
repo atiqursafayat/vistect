@@ -9,6 +9,16 @@
 - **Cons:** no SSR/SEO (irrelevant — authenticated local tool, not a content site); React 19 concurrent features need discipline in SR contexts (avoid layout-tearing around live regions).
 - **Alternatives:** *Next.js* (rejected: SSR adds nothing, complicates client-only WebMCP lifecycle); *SvelteKit* (smaller bundles, but smaller a11y component ecosystem); *Angular* (native WebMCP docs exist, but heavier and less fit for solo velocity).
 
+## WebMCP Target & Versioning
+**Target:** Chrome 149 Origin Trial (Web Machine Learning Community Group draft, first published February 2026).
+- **Spec version pin:** `WEB_MCP_SPEC_VERSION = "chrome-149-origin-trial-2026-05"` in `packages/webmcp/src/version.ts`.
+- **Feature detection:** `if ('modelContext' in navigator)` guard on all registration (progressive enhancement).
+- **API surface:** Imperative `navigator.modelContext.registerTool()` only (no declarative forms in Vistect).
+- **Tool annotations:** `annotations: { readOnlyHint: boolean, untrustedContentHint: boolean }` required on every tool.
+- **Confirmation:** `execute(input, client)` with `client.requestUserInteraction()` for sensitive operations.
+- **Headers:** `Permissions-Policy: tools=(self)` on hosting; CSP `script-src 'self'`.
+- **CI drift check:** Registry snapshot test validates tool names/descriptions/schemas against pinned `pins/reg-v1.json`; forbidden-pattern scan (`approve_all`, `publish_everything`, etc.) blocks merge.
+
 ## Language / type safety
 **Recommendation: TypeScript `strict:true`, `noImplicitAny`, `exactOptionalPropertyTypes`; ESLint `no-explicit-any` = error; `ts-reset`-style strictness on lib calls.**
 - Zero-`any` policy per coding standards; Zod parse at every boundary (tool inputs, storage loads, imports).

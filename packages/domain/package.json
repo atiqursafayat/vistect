@@ -1,0 +1,68 @@
+{
+  "name": "@vistect/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "import": "./dist/events/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands/index.d.ts",
+      "import": "./dist/commands/index.js"
+    },
+    "./bus": {
+      "types": "./dist/bus/index.d.ts",
+      "import": "./dist/bus/index.js"
+    },
+    "./machines": {
+      "types": "./dist/machines/index.d.ts",
+      "import": "./dist/machines/index.js"
+    },
+    "./invariants": {
+      "types": "./dist/invariants/index.d.ts",
+      "import": "./dist/invariants/index.js"
+    },
+    "./decisions": {
+      "types": "./dist/decisions/index.d.ts",
+      "import": "./dist/decisions/index.js"
+    },
+    "./validation": {
+      "types": "./dist/validation/index.d.ts",
+      "import": "./dist/validation/index.js"
+    },
+    "./toolSchemas": {
+      "types": "./dist/toolSchemas/index.d.ts",
+      "import": "./dist/toolSchemas/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "tsx scripts/generate-db.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "tsx": "^4.19.0"
+  }
+}

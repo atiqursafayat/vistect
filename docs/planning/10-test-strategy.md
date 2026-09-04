@@ -45,11 +45,15 @@
 - Given two projects, when tool references foreign object id, then NotFound (scoped).
 
 ## 7. Contract tests — WebMCP registry
-- Every tool: name matches `^[a-z][a-z0-9_]+$` verb-based; description is static constant (no interpolation — AST-level check on registry source); inputSchema has `additionalProperties:false`, `required` ⊆ properties; execute result shape `{content:[{type:"text"}]}`.
-- Snapshot: full registry (names/descriptions/schemas) byte-identical to pinned JSON; diff fails CI.
-- Forbidden-pattern scan (§18.12).
+- Every tool: name matches `^[a-z][a-z0-9_.-]+$` verb-based; description is static constant (no interpolation — AST-level check on registry source); inputSchema has `additionalProperties:false`, `required` ⊆ properties; execute result shape `{content:[{type:"text"}]}`; **`annotations` field present with `readOnlyHint` and/or `untrustedContentHint` booleans**.
+- Snapshot: full registry (names/descriptions/schemas/annotations) byte-identical to pinned JSON `pins/reg-v1.json`; diff fails CI.
+- Forbidden-pattern scan (§18.12): `approve_all`, `publish_everything`, `generate_and_export_without_review`, broad autonomous design verbs.
 - Read/write classification: write tools require `expectedDocumentVersion`; read tools contain no mutation imports (dependency-cruiser rule).
-- Mock `document.modelContext` harness: register → executeTool → assert dispatch, gate (rate limit, approval staging), unregister on project close, `AbortSignal` honored.
+- **Tool annotations classification:** `readOnlyHint: true` for all inspect/get/list/analyze tools; `untrustedContentHint: true` for tools returning imported/OCR content; completeness check fails if any tool missing annotations.
+- **`requestUserInteraction` enforcement:** consequential tools (export finalize, delete, irreversible mutations) have `client.requestUserInteraction` call in `execute` body; static analysis (ESLint rule) verifies call presence.
+- **Spec version drift:** CI compares registered tool shapes against `WEB_MCP_SPEC_VERSION` constant; fails on unexplained additions/removals/changes.
+- Mock `document.modelContext` harness: register → `getTools()` → `executeTool()` dry-run → assert dispatch, gate (rate limit, approval staging, `requestUserInteraction`), unregister on project close, `AbortSignal` honored.
+- **Introspection rate limit:** `getTools()` / `executeTool()` calls subject to same per-tool token-bucket limits; burst test asserts `RateLimitedError` with `retryAfterMs`.
 
 ## 8. E2E tests (Playwright) — user journeys
 1. **Create-from-scratch (keyboard only):** new project → intent contract → outline → add pages/text → reorder → navigator travel → object explorer inspection → autosave indicator → reload persistence.

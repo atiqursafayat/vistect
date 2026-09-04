@@ -7,17 +7,17 @@
 ```mermaid
 graph TB
     subgraph Users
-        BV[Blind / low-vision author\n(NVDA / JAWS / keyboard)]
+        BV["Blind / low-vision author<br/>(NVDA / JAWS / keyboard)"]
     end
     subgraph ClientEnvironment
-        AG[WebMCP-capable browser agent\n(ChatGPT in-app browser,\nChrome 149+ with flag)]
-        WEB[Vistect Web App\n(static SPA, local-first)]
-        AG -- "typed tool calls\n(modelContext.executeTool)" --> WEB
-        WEB -- "structured results,\nactivity stream" --> AG
+        AG["WebMCP-capable browser agent<br/>(Chrome 149+ origin trial / flag;<br/>ChatGPT in-app browser — to be verified)"]
+        WEB["Vistect Web App<br/>(static SPA, local-first, secure context)"]
+        AG -- "typed tool calls<br/>(browser invokes tool.execute)" --> WEB
+        WEB -- "summary-first result string,<br/>activity stream" --> AG
     end
     BV -- "keyboard + SR + agent chat" --> AG
     BV -- "keyboard + screen reader" --> WEB
-    WEB -- "artifacts" --> FS[(Local device:\nIndexedDB + file downloads)]
+    WEB -- "artifacts" --> FS[("Local device:<br/>IndexedDB + file downloads")]
     WEB -.-> |"no egress by default"| NET[Network]
     style NET stroke-dasharray: 5 5
 ```
@@ -29,17 +29,17 @@ graph TB
 ```mermaid
 graph TB
     subgraph appsweb[apps/web — Vite React SPA]
-        UI[Accessible Interface\nnavigator · object explorer ·\ndecision cards · warning queue ·\nactivity stream · privacy center]
-        ST[Zustand projection stores\n(view state + domain projection)]
-        WM[WebMCP registration shell\npackages/webmcp adapter]
+        UI["Accessible Interface<br/>navigator · object explorer ·<br/>decision cards · warning queue ·<br/>activity stream · privacy center"]
+        ST["Zustand projection stores<br/>(view state + domain projection)"]
+        WM["WebMCP registration shell<br/>packages/webmcp adapter"]
     end
     subgraph domainlayer[Pure packages — no React, no DOM]
-        DOM2[packages/domain\nschemas · events · command bus ·\nstate machines · invariants · decisions]
-        GRP[packages/graph\ntopology validation · layout adapters]
-        CHT[packages/charting\nchart spec → SVG · integrity checks]
-        RPDF[packages/render-pdf\npdf-lib deterministic renderer]
-        RHTML[packages/render-html\naccessible HTML bundle]
-        STOR[packages/storage\nIndexedDB event store ·\nsnapshots · quota · Web Crypto]
+        DOM2["packages/domain<br/>schemas · events · command bus ·<br/>state machines · invariants · decisions"]
+        GRP["packages/graph<br/>topology validation · layout adapters"]
+        CHT["packages/charting<br/>chart spec → SVG · integrity checks"]
+        RPDF["packages/render-pdf<br/>pdf-lib deterministic renderer"]
+        RHTML["packages/render-html<br/>accessible HTML bundle"]
+        STOR["packages/storage<br/>IndexedDB event store ·<br/>snapshots · quota · Web Crypto"]
     end
     UI --> ST
     WM --> ST
@@ -98,7 +98,7 @@ sequenceDiagram
 
 ## 5. Data Flow (authoring loop)
 
-1. User/agent issues semantic command (e.g., `place_image_relative_to`).
+1. User/agent issues semantic command (e.g., `place_object_relative_to`).
 2. Domain computes **relative constraints** → layout engine resolves **bounds** (template grid + constraints → geometry).
 3. Same resolved geometry feeds: on-screen preview (HTML/SVG), deterministic validators (overlap/overflow/contrast), and exporters (HTML/PDF). **One layout engine, three consumers** — this is what makes "export the exact version you inspected" true (ADR-003).
 4. Findings recompute incrementally per affected scope (object/page/document).
@@ -121,9 +121,9 @@ sequenceDiagram
 ## 7. Permission Model
 
 - **Local actor model:** a local pseudonymous actor id (generated UUID, label "You") fills `approvedBy`; agents are actors of kind `browser_agent` with the agent's reported origin where available. No accounts, no network identity (gap G1 closed by design).
-- **Operation classes:** `read` (free), `write` (command bus, version-gated), `consequential` (stages a decision — requires human approval before effects become approved state), `finalizing` (export — requires approval token issued by explicit user gesture).
-- **WebMCP permissions:** tools registered on `document.modelContext`; default visibility (own origin + built-in agents); no cross-origin `exposedTo` in R1; `Permissions-Policy: tools=(self)` on hosting headers.
-- **Agent action authority:** an agent can *propose* anything, *execute* nothing finalizing, and *never* self-approve. Enforced in command bus guards, not in UI.
+- **Operation classes (ADR-008 §2.3):** `read` (31 tools, free, `readOnlyHint`) · `write` (19, command bus, version-gated) · `consequential` (17, stages a `VisualDecision` requiring later human approval) · `human_gated` (5, completes only inside `client.requestUserInteraction`, where the user's gesture mints the approval token).
+- **WebMCP permissions:** tools registered on `navigator.modelContext`; `exposedTo` left at default (own origin + built-in agents), no cross-origin exposure in R1 (FR-166); `Permissions-Policy` value for WebMCP to be confirmed against the current spec before Phase 9 (tracked in ADR-008 §4 A11 / release checklist) rather than assumed.
+- **Agent action authority:** an agent can *propose* anything, *execute* nothing finalizing without a user gesture, and *never* self-approve. Enforced structurally: finalizing tools obtain their token from inside `requestUserInteraction`, and the approve/reject commands are not exposed as tools at all (FR-163). Command-bus guards remain as the second line, not the only one.
 
 ## 8. Versioning Architecture
 
@@ -168,25 +168,61 @@ stateDiagram-v2
 
 ## 12. WebMCP Architecture (ADR-008)
 
+> **ADR-008 is the authoritative contract** and supersedes spec §19 on the registration namespace and the `execute` return shape, and supersedes the §18.2–18.11 tool enumeration. Registration is on **`navigator.modelContext`**. Everything in this section is testable against ADR-008 §4's dated assumption list.
+
 ```mermaid
 graph LR
     subgraph packages/webmcp
-        REG[ToolRegistry]
-        COMP[SchemaCompiler\nZod → JSON Schema]
-        GATE[ExecutionGate\nversion check · approval staging · rate limit]
-        ACT[ActivityRecorder]
-        CAP[CapabilityProbe\ndocument.modelContext?]
+        CAP["CapabilityProbe<br/>'modelContext' in navigator?<br/>secure context? writer tab?"]
+        COMP["SchemaCompiler<br/>Zod → JSON Schema"]
+        DEF["defineTool()<br/>wraps execute with the gate"]
+        GATE["ExecutionGate<br/>version · class · rate · scope"]
+        REG["Registry<br/>navigator.modelContext.registerTool"]
+        ACT["ActivityRecorder"]
+        FMT["SummaryFormatter<br/>summary-first string"]
     end
-    BA[Browser agent] -- executeTool --> REG
-    REG --> GATE -- command bus --> CBUS[(packages/domain command bus)]
-    CBUS -- Result --> ACT -- content:[{type:text}] --> BA
+    CAP --> REG
+    COMP --> DEF
+    DEF --> REG
+    BA["Browser agent"] -- "browser invokes execute" --> GATE
+    GATE -- command --> CBUS[("packages/domain command bus")]
+    CBUS -- Result --> ACT --> FMT -- "string" --> BA
 ```
 
-- **Registration lifecycle:** probe on app start; register tools when a project context opens; `AbortController` unregister on project close/route change; re-register on `toolchange`-capable browsers.
-- **Schemas:** every tool input is a Zod schema in `packages/domain/toolSchemas`; `zod-to-json-schema` emits `additionalProperties:false` JSON Schema at build time — single source of truth (ADR-004).
-- **Results:** MCP content format `{content:[{type:"text",text:JSON.stringify(structured)}]}`; minimal necessary fields; never HTML; never instructions.
-- **Injection defense:** tool descriptions are static strings from code; tool results are data (never evaluated); document text is rendered as text nodes only; see `07-security-review.md`.
-- **Degradation:** without `document.modelContext`, the app is fully usable via keyboard/UI; agent-only affordances hide with an explanatory note (FR-127).
+**Namespace.** `navigator.modelContext`. Nothing outside `packages/webmcp` may reference it (lint-enforced, NFR-017). The prior `document.modelContext` reading would have made the capability probe permanently falsy: no tool would register, degradation would engage on every load, and the mock harness — mocking the same wrong object — would have stayed green.
+
+**Registry.** Exactly **72 tools** in 10 groups (canonical list: ADR-008 §2.3). Operation classes: 31 read, 19 write, 17 consequential, 5 human-gated.
+
+**Gate placement.** The agent's invocations reach each tool's own `execute` directly; `executeTool` is a page-side dry-run/diagnostics entry point only. A gate at the registry boundary would therefore be bypassed by every real agent call while still appearing to work in dry-runs. The gate is applied at **tool-definition time**: `defineTool()` returns an already-wrapped `execute`, and no `registerTool` call site may pass a raw function (FR-162).
+
+**Schemas.** Every tool input is a Zod schema in `packages/domain/toolSchemas`; `zod-to-json-schema` emits `additionalProperties:false` JSON Schema at build time — single source of truth (ADR-004). Loose enough to read; the real checking happens inside `execute` with errors that say what to do next.
+
+**Annotations (FR-129).** `readOnlyHint: true` on all 31 read tools — exactly the read class, verified in both directions. `untrustedContentHint: true` on the 28 read tools that surface text from imports, uploads, or user authoring, so the agent treats that text as data rather than instructions. This is the platform's own contribution to the T-02 / SEC-02 defence and sits alongside (not instead of) static descriptions, results-as-data, and the injection corpus.
+
+**Titles.** Every tool sets `title`. Without it the activity stream announces `place_object_relative_to` verbatim to a screen reader; with it, "Place an object relative to another".
+
+**Results.** `execute` returns a **string**, which the browser wraps — not an MCP `{content:[…]}` envelope, which is the server wire format. The string is summary-first (FR-160): one plain-language sentence naming what changed, the new document version, and the unapproved-decision count, then the structured payload. One string serves both the agent's comprehension and the FR-152 announcement. Read results always carry `currentDocumentVersion` (FR-161), so the agent has a legitimate source for `expectedDocumentVersion`.
+
+**Human authority — two tiers, deliberately distinct.**
+- *Consequential* (17): the tool applies the change as `proposed`, opens a `VisualDecision` with alternatives and evidence, announces, and enqueues for `Alt+U`. Review happens later in a real decision card. This is stronger than a modal confirmation and is the product's differentiator (PR-03).
+- *Human-gated* (5): `execute` awaits `client.requestUserInteraction(callback)`; the user's gesture inside the callback mints the approval token and supplies the `human` actor, so I-03 and I-11 hold by construction rather than by a rejecting guard.
+
+`approve_visual_decision` / `reject_visual_decision` are **not registered** — an agent-invocable approval either always fails (misleading tool design) or lets the agent decide (violates product principle 1). `open_decision_for_review` replaces them and reports the user's own choice (FR-163).
+
+**Injection defense:** tool descriptions are static string constants from code; tool results are data (never evaluated); document text renders as text nodes only; see `07-security-review.md`.
+
+**Registration lifecycle.**
+1. Probe on app start → typed `CapabilityReport` with reason (`ok` · `no_api` · `insecure_context` · `read_only_tab`), surfaced to the user (FR-164). WebMCP requires a secure context (NFR-016).
+2. Register when a project context opens, scoped to one `AbortController` per project session.
+3. Read-only secondary tabs register **read tools only** (FR-165); writes there return guidance to switch tabs.
+4. `controller.abort()` on project close, route change, or loss of writer status.
+5. `ontoolchange` is an **outbound** notification that the tool set changed — it is not a trigger for the page to re-register. Lifetime is governed solely by our own controllers.
+
+**Degradation:** without WebMCP the app is fully usable via keyboard/UI; agent-only affordances hide with an explanatory note naming the probe reason (FR-127, FR-164). WebMCP is the extra lane for agents, never the only lane.
+
+**Declarative API:** evaluated and rejected for R1 (ADR-008 §2.10) — core operations are not form-shaped, and annotating the three form-shaped surfaces would create a second write path around the command bus. `toolautosubmit` is never used (FR-167).
+
+- **Spec version pin:** `WEB_MCP_SPEC_VERSION = "chrome-149-origin-trial-2026-05"` constant in `packages/webmcp/src/version.ts`; CI fails if registered tool shapes drift from this spec version.
 
 ## 13. Design Decisions & Tradeoffs (summary; full reasoning in ADRs)
 

@@ -70,7 +70,7 @@
 | FR-061 | Formats: JPEG, PNG, WebP, SVG (safe+parseable only); MIME sniffing, size caps, sanitization | M |
 | FR-062 | Asset record: fileName, mime, dimensions, sourceType, sourceReference, license, localOnly, detectedText, observations/interpretations/uncertainties, qualityFindings | M |
 | FR-063 | Local metadata extraction (dimensions, format, EXIF-derived facts where parseable) | M |
-| FR-064 | Agent-driven structured analysis via WebMCP tools (`inspect_image` returns context; `record_image_analysis` enforces observation/interpretation/uncertainty separation) | M |
+| FR-064 | Agent-driven structured analysis via WebMCP tools (`inspect_image_asset` returns context; `record_image_analysis` enforces observation/interpretation/uncertainty separation) | M |
 | FR-065 | Image comparison across ≥3 candidates with criteria: intent alignment, subject relevance, composition, emotional tone, professional quality, representation, stereotype/charity framing, crop flexibility, title-safe area, distracting details, visual complexity, source/license, resolution, model confidence/disagreement | M |
 | FR-066 | Semantic cropping instructions: keep subject/faces/hands visible, remove region, leave title space, square/full-width crop, center subject | M |
 | FR-067 | Crop validation: face/subject truncation, post-crop resolution, aspect ratio, title-safe region, focal point, important detected text, object loss | M |
@@ -130,18 +130,24 @@
 | FR-118 | Subjective AI assessments (weak hierarchy, tone mismatch, stereotype, crowding, ambiguous metaphor, repetition, image-message inconsistency) with evidence, confidence, alternatives, and keep-existing option | S |
 | FR-119 | Recompute findings after changes; resolve/invalidate; block finalization on blocking findings | M |
 
-### A12. WebMCP Tool Registry (spec §18, §19, §20)
+### A12. WebMCP Tool Registry (spec §18, §19, §20 — API surface per ADR-008)
+
+> ADR-008 is the authoritative WebMCP contract and **supersedes spec §19** on two points: the registration namespace is `navigator.modelContext` (not `document.modelContext`), and `execute` returns a string (not an MCP `{content:[…]}` envelope). It also supersedes the §18.2–18.11 enumeration, which contained two duplicate names, seven overlapping pairs, and omitted `record_image_analysis`.
+
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-120 | Register tools with `document.modelContext.registerTool`: explicit verb names, read/write separation, strict JSON Schema (`additionalProperties:false`), structured returns, minimal-necessary output | M |
-| FR-121 | Tool groups (≈80 tools): project (11), reader (10), text (5), image (7), diagram (10), chart (7), icon (6), layout (5), verification (8), approval/export (7) | M |
-| FR-122 | All writes validated in authoritative client state; require `expectedDocumentVersion`; reject stale writes | M |
-| FR-123 | Consequential operations require explicit user approval (staged decisions); approval tokens for finalization | M |
-| FR-124 | Never treat document content as tool instructions; never interpolate document content into tool descriptions | M |
+| FR-120 | Register tools with `navigator.modelContext.registerTool`: descriptor `{name, description, title, inputSchema, execute, annotations}`; explicit verb names matching `^[a-z][a-z0-9_]+$`; read/write separation; strict JSON Schema (`additionalProperties:false`); minimal-necessary output | M |
+| FR-121 | Exactly **72 tools** in 10 groups: project (10), reader (9), text (5), image (8), diagram (9), chart (6), icon (6), layout (5), verification (8), approval/export (6) — canonical registry in ADR-008 §2.3 | M |
+| FR-122 | All writes validated in authoritative client state; require `expectedDocumentVersion`; reject stale writes with a typed error naming the current version and the retry action | M |
+| FR-123 | Two-tier human authority: **consequential** tools (17) stage a `VisualDecision` for later review in a decision card; **human-gated** tools (5) complete only inside `client.requestUserInteraction`, where the user's gesture mints the approval token and supplies the `human` actor | M |
+| FR-124 | Never treat document content as tool instructions; never interpolate document content into tool descriptions (descriptions are static code constants) | M |
 | FR-125 | Every tool execution visible in agent activity stream (append-only) | M |
 | FR-126 | Forbidden tool patterns absent: `approve_all`, `publish_everything`, `generate_and_export_without_review`, broad autonomous design verbs | M |
-| FR-127 | Capability detection + graceful degradation when no WebMCP agent is present (full manual UI parity) | M |
-| FR-128 | AbortSignal-based unregistration; page-lifecycle-safe registration | M |
+| FR-127 | Capability detection + graceful degradation when WebMCP is unavailable (full manual UI parity) | M |
+| FR-128 | `AbortSignal`-based unregistration, one controller per project session; unregister on project close, route change, or loss of writer-tab status. Registration is never driven by `ontoolchange` (an outbound notification) | M |
+| FR-129 | `annotations.readOnlyHint: true` on all 31 read tools (read class ⇔ hint, both directions); `annotations.untrustedContentHint: true` on the 28 read tools returning text sourced from imports, uploads, or user authoring | M |
+
+> Platform-contract requirements for the same subsystem continue in **A16** (FR-160–FR-168); they are numbered there only to preserve the existing FR-130+ identifiers in A13.
 
 ### A13. Approval & Export (spec §23.3, §27, §28)
 | ID | Requirement | Priority |
@@ -170,6 +176,19 @@
 | FR-152 | Agent action announcements (what changed, unapproved count, Alt+U hint); no automatic focus move unless immediate review required | M |
 | FR-153 | Semantic object explorer exposing type, accessible name, page, purpose, relative position, reading-order position, dimensions in understandable terms, source, approval state, warnings, available actions | M |
 
+### A16. WebMCP Platform Contract (continuation of A12 — ADR-008)
+| ID | Requirement | Priority |
+|---|---|---|
+| FR-160 | Every tool `execute` returns a **summary-first string**: one plain-language sentence (what changed · document version · unapproved-decision count), then the structured payload. A bare `JSON.stringify` return is prohibited. The same string feeds the agent and the activity-stream announcement (FR-152) | M |
+| FR-161 | Every read result carries `currentDocumentVersion`, so the agent has a legitimate source for `expectedDocumentVersion` on its first write of a session | M |
+| FR-162 | `ExecutionGate` (version check, class enforcement, rate limit, activity recording, project scoping) is applied at tool-definition time via `defineTool()`; no `registerTool` call site may pass an unwrapped `execute`. Rationale: agent invocations reach `execute` directly and never traverse `executeTool`, so a registry-boundary gate would be bypassed by every real agent call | M |
+| FR-163 | No tool may be registered that the command bus will always reject. `approve_visual_decision` / `reject_visual_decision` are therefore **not** registered (they would violate I-03 on every call); `open_decision_for_review` brings the user to the decision card and reports the choice the user made. The internal approve/reject commands remain UI-only | M |
+| FR-164 | Capability probe returns a typed `CapabilityReport` with reason code (`ok` · `no_api` · `insecure_context` · `read_only_tab`) and surfaces the reason to the user rather than swallowing it | M |
+| FR-165 | In a read-only secondary tab (single-writer election, NFR-008), register read tools only; any write attempt returns guidance to switch to the editing tab | M |
+| FR-166 | `exposedTo` left at default (own origin + built-in agents); no cross-origin exposure in R1 | M |
+| FR-167 | `toolautosubmit` is never used on any form in Vistect; the declarative API is not used in R1 (evaluated and rejected — ADR-008 §2.10) | M |
+| FR-168 | Origin-trial token provisioned as `<meta http-equiv="origin-trial">` plus response header; expiry date and renewal owner recorded in the release checklist | M |
+
 ## B. Non-Functional Requirements
 
 | ID | Category | Requirement |
@@ -185,7 +204,9 @@
 | NFR-009 | Maintainability | TypeScript strict, zero `any`; Zod at every boundary; pure domain package with no React/DOM imports (enforced by lint); SOLID; functional core / imperative shell |
 | NFR-010 | Observability | Local-only structured logs (ring buffer in IndexedDB); agent action audit stream; privacy receipt log; debug export bundle for support |
 | NFR-011 | Testability | Domain and engines fully unit-testable without DOM; ≥90% branch coverage on domain/graph/charting/validation; E2E covers §34 demo script |
-| NFR-012 | Compatibility | Chrome 149+ (WebMCP flag/origin-trial), ChatGPT in-app browser, evergreen Firefox/Safari for non-agent surfaces |
+| NFR-012 | Compatibility | Chrome 149+ with the WebMCP origin trial enabled (token per FR-168) or the local flag; ChatGPT in-app browser (support to be verified by a Phase 1 spike, not assumed); evergreen Firefox/Safari for non-agent surfaces, where the app must remain fully operable without WebMCP |
 | NFR-013 | Internationalization | Document `language` field honored in exports (lang attributes); UI copy externalized for future i18n; R1 UI language: English |
 | NFR-014 | Data durability | Explicit delete only; project file export/import as backup path; quota-aware eviction never silently deletes projects |
 | NFR-015 | Legal/License | MIT-licensed open-source repo; icon library (Lucide) ISC; no copyleft contamination; fonts OFL/Apache |
+| NFR-016 | Platform constraint | WebMCP requires a **secure context**. Production is HTTPS; `localhost` is a secure context for development. Plain-HTTP LAN or device testing (e.g. NVDA on a second machine, in-app browser against a preview) disables WebMCP entirely — the probe must report `insecure_context` (FR-164) so this is diagnosable rather than indistinguishable from an absent agent. Documented in the dev runbook. |
+| NFR-017 | Platform volatility | WebMCP is a W3C draft in origin trial and its API surface will move. All contact with `navigator.modelContext` is confined to `packages/webmcp`; no other package or app module may reference it (lint-enforced). API assumptions are dated in ADR-008 §4 and re-verified at Phase 6 exit and Phase 9 deploy. |

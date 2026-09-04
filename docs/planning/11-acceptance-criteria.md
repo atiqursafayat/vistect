@@ -30,7 +30,7 @@
 
 **Feature F-5.x Validation/Approval/Export** — AC: (1) Full §16 suite; manifest per §28; finalize chain per I-11; hashes bind artifacts. (2) Manifest is SR-friendly report; Alt+U queue; version diff announced. (3) Approval tokens human-gesture-bound; stale finalize rejected. (4) Blocking findings produce actionable messages with suggested actions. (5) Findings recompute timings logged; export job records hashes.
 
-**Feature F-6.x WebMCP hardening** — AC: (1) ~80 tools registered with read/write split. (2) Announcements for agent actions per §21.3 template. (3) All `07-security-review.md` §3 suites green; rate limits; snapshot pinning. (4) No-agent degradation complete. (5) Tool metrics: calls, rejects by reason.
+**Feature F-6.x WebMCP hardening** — AC: (1) ~80 tools registered with read/write split; every tool has `annotations` field (`readOnlyHint` / `untrustedContentHint` classified correctly). (2) Announcements for agent actions per §21.3 template; no focus theft. (3) All `07-security-review.md` §3 suites green; token-bucket rate limits per tool; snapshot pinning; `requestUserInteraction` enforced on consequential tools. (4) No-agent degradation complete (capability probe false → tools absent, UI fully operable). (5) Tool metrics: calls, rejects by reason, rate-limit hits. (6) Spec version pin: `WEB_MCP_SPEC_VERSION` constant matches Chrome 149 origin trial; CI drift check passes. (7) Introspection rate-limited: `getTools()` / `executeTool()` burst → `RateLimitedError` with `retryAfterMs`.
 
 **Feature F-7.x A11y validation** — AC: (1) All §32.3 scripted tests pass and recorded. (2) NVDA primary; JAWS/VoiceOver reduced sets. (3) n/a. (4) n/a. (5) Conformance statement + known limitations published.
 

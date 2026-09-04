@@ -1,0 +1,39 @@
+{
+  "name": "Vistect",
+  "short_name": "Vistect",
+  "description": "WebMCP-native accessible visual document workspace for blind and low-vision professionals",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9fa",
+  "theme_color": "#1a1a2e",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "accessibility", "graphics"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "New Project",
+      "short_name": "New",
+      "description": "Create a new document project",
+      "url": "/?new=true",
+      "icons": [{ "src": "/favicon.svg", "sizes": "32x32" }]
+    },
+    {
+      "name": "Open Recent",
+      "short_name": "Recent",
+      "description": "Open a recent project",
+      "url": "/?recent=true",
+      "icons": [{ "src": "/favicon.svg", "sizes": "32x32" }]
+    }
+  ],
+  "prefer_related_applications": false,
+  "related_applications": []
+}

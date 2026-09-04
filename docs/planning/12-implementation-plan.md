@@ -46,9 +46,9 @@
 - **Migration:** v2→v3 (export store). **Rollback:** export is read-only w.r.t. project; disabling export flag safe.
 
 ## Phase 6 — WebMCP Hardening
-- **Files:** `packages/webmcp/src/tools/*.ts` (all groups), `gate.ts` (rates/tokens), `pin.ts` (snapshot).
-- **Interfaces:** registry completes §18.2–18.11 enumerations.
-- **Tests:** full contract suite; mock-agent §34 sequence; degradation test.
+- **Files:** `packages/webmcp/src/tools/*.ts` (all groups), `gate.ts` (rates/tokens, `requestUserInteraction` wrapper), `pin.ts` (snapshot), `version.ts` (`WEB_MCP_SPEC_VERSION`), `registry.ts` (annotations field), `eslint-rules/request-user-interaction.ts` (static analysis rule).
+- **Interfaces:** registry completes §18.2–18.11 enumerations; every tool carries `annotations`; `execute(input, client)` signature with `client.requestUserInteraction` for consequential tools.
+- **Tests:** full contract suite (annotations completeness, `requestUserInteraction` static analysis, spec version drift, introspection rate limit); mock-agent §34 sequence; degradation test; `getTools()` / `executeTool()` dry-run verification.
 - **Migration:** registry pin file versioned (pins/reg-v1.json). **Rollback:** pin diff blocks bad changes pre-merge.
 
 ## Phase 7 — Accessibility Validation
