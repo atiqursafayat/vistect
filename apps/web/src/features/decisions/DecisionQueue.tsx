@@ -2,10 +2,12 @@
 // Decision Queue (Alt+U)
 // ============================================================================
 
-import React, { useMemo, useState } from 'react';
-import { useProject, useProjectDecisions, useUnapprovedDecisionCount } from '../../state';
-import type { VisualDecision, DecisionOption } from '@vistect/domain/schema';
+import type { DecisionId, DecisionOption, OptionId } from '@vistect/domain/schema';
+import { useMemo, useState } from 'react';
+
+
 import { useAnnouncements } from '../../app/Providers';
+import { useProject, useProjectDecisions, useUnapprovedDecisionCount } from '../../state';
 
 const CATEGORY_LABELS: Record<string, string> = {
   page_structure: 'Page Structure',
@@ -45,7 +47,22 @@ const CATEGORY_ICONS: Record<string, string> = {
   export_format: '📦',
 };
 
-export function DecisionQueue({ id }: { id: string }) {
+export interface DecisionQueueProps {
+  id: string;
+  /** Dispatches ApproveDecision. Absent until the command bus is wired in. */
+  onApprove?: (decisionId: DecisionId, optionId: OptionId, reason?: string) => void;
+  /** Dispatches RejectDecision. */
+  onReject?: (decisionId: DecisionId, reason: string) => void;
+  /** Dispatches RequestDecisionAlternatives. */
+  onRequestAlternatives?: (decisionId: DecisionId) => void;
+}
+
+export function DecisionQueue({
+  id,
+  onApprove,
+  onReject,
+  onRequestAlternatives,
+}: DecisionQueueProps) {
   const { project } = useProject();
   const decisions = useProjectDecisions();
   const unapprovedCount = useUnapprovedDecisionCount();
@@ -62,19 +79,22 @@ export function DecisionQueue({ id }: { id: string }) {
     return filtered;
   }, [decisions, filter]);
 
-  const handleApprove = (decisionId: string, optionId: string, reason?: string) => {
-    // Would dispatch ApproveDecision command
-    announce(`Decision approved: ${decisionId}`);
+  // Approval is a human-only command (I-03), so these handlers are the sole
+  // entry point for it; the dispatchers are injected by the parent once the
+  // command bus is wired in.
+  const handleApprove = (decisionId: DecisionId, optionId: OptionId, reason?: string) => {
+    onApprove?.(decisionId, optionId, reason);
+    announce('Decision approved');
   };
 
-  const handleReject = (decisionId: string, reason: string) => {
-    // Would dispatch RejectDecision command
-    announce(`Decision rejected: ${decisionId}`);
+  const handleReject = (decisionId: DecisionId, reason: string) => {
+    onReject?.(decisionId, reason);
+    announce('Decision rejected');
   };
 
-  const handleRequestAlternatives = (decisionId: string) => {
-    // Would dispatch RequestDecisionAlternatives command
-    announce(`Alternatives requested for: ${decisionId}`);
+  const handleRequestAlternatives = (decisionId: DecisionId) => {
+    onRequestAlternatives?.(decisionId);
+    announce('Alternatives requested');
   };
 
   if (!project) {
@@ -88,7 +108,7 @@ export function DecisionQueue({ id }: { id: string }) {
   }
 
   return (
-    <section id={id} className="decision-queue" aria-label="Decision queue" role="region" aria-live="polite">
+    <section id={id} className="decision-queue" aria-label="Decision queue" aria-live="polite">
       <header className="queue-header">
         <h2>Decisions Requiring Review</h2>
         <span className="queue-count" aria-label={`${unapprovedCount} unapproved decisions`}>
@@ -99,49 +119,49 @@ export function DecisionQueue({ id }: { id: string }) {
       <div className="queue-filters">
         <button
           className={filter === 'all' ? 'active' : ''}
-          onClick={() => setFilter('all')}
+          onClick={() => { setFilter('all'); }}
           aria-pressed={filter === 'all'}
         >
           All ({filteredDecisions.length})
         </button>
         <button
           className={filter === 'proposed' ? 'active' : ''}
-          onClick={() => setFilter('proposed')}
+          onClick={() => { setFilter('proposed'); }}
           aria-pressed={filter === 'proposed'}
         >
           Proposed ({decisions.filter(d => d.status === 'proposed').length})
         </button>
         <button
           className={filter === 'stale' ? 'active' : ''}
-          onClick={() => setFilter('stale')}
+          onClick={() => { setFilter('stale'); }}
           aria-pressed={filter === 'stale'}
         >
           Stale ({decisions.filter(d => d.status === 'stale').length})
         </button>
         <button
           className={filter === 'open' ? 'active' : ''}
-          onClick={() => setFilter('open')}
+          onClick={() => { setFilter('open'); }}
           aria-pressed={filter === 'open'}
         >
           Open ({decisions.filter(d => d.status === 'open').length})
         </button>
       </div>
 
-      <div className="queue-list" role="list" aria-label="Pending decisions">
+      <div className="queue-list">
         {filteredDecisions.length === 0 ? (
           <div className="empty-state">
             <h3>No pending decisions</h3>
             <p>All decisions have been reviewed</p>
           </div>
         ) : (
-          <ul role="list">
-            {filteredDecisions.map(decision => (
-              <li key={decision.id} className={`decision-card ${decision.status}`} role="listitem">
+          <ul aria-label="Pending decisions">
+            {filteredDecisions.map((decision) => (
+              <li key={decision.id} className={`decision-card ${decision.status}`}>
                 <div className="decision-header">
                   <span className="decision-category-icon" aria-hidden="true">
-                    {CATEGORY_ICONS[decision.category] || '📋'}
+                    {CATEGORY_ICONS[decision.category] ?? '📋'}
                   </span>
-                  <span className="decision-category">{CATEGORY_LABELS[decision.category] || decision.category}</span>
+                  <span className="decision-category">{CATEGORY_LABELS[decision.category] ?? decision.category}</span>
                   <span className={`decision-status ${decision.status}`}>
                     {decision.status.charAt(0).toUpperCase() + decision.status.slice(1)}
                   </span>
@@ -213,7 +233,7 @@ export function DecisionQueue({ id }: { id: string }) {
                   {decision.status === 'rejected' && (
                     <button
                       className="btn btn-secondary btn-sm"
-                      onClick={() => handleRequestAlternatives(decision.id)}
+                      onClick={() => { handleRequestAlternatives(decision.id); }}
                     >
                       Request Alternatives
                     </button>
@@ -228,7 +248,7 @@ export function DecisionQueue({ id }: { id: string }) {
                   )}
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => setSelectedDecision(selectedDecision === decision.id ? null : decision.id)}
+                    onClick={() => { setSelectedDecision(selectedDecision === decision.id ? null : decision.id); }}
                   >
                     {selectedDecision === decision.id ? 'Hide' : 'Details'}
                   </button>
@@ -255,7 +275,7 @@ export function DecisionQueue({ id }: { id: string }) {
                         </div>
                       )}
                       <div>
-                        <strong>Selection reason:</strong> {decision.selectionReason || '(none)'}
+                        <strong>Selection reason:</strong> {decision.selectionReason ?? '(none)'}
                       </div>
                     </div>
                   </details>

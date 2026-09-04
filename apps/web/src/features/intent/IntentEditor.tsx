@@ -2,10 +2,19 @@
 // Intent Contract Editor
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
-import { useProject } from '../../state';
 import type { IntentContract } from '@vistect/domain/schema';
+import { useEffect, useState } from 'react';
+
 import { useAnnouncements } from '../../app/Providers';
+import { useProject } from '../../state';
+
+/**
+ * Field-level validation messages.
+ *
+ * Keyed by field path so nested fields (`brandColors.primary`) can report against
+ * the exact input the user must fix (AC F-1.4 §4).
+ */
+type FieldErrors = Record<string, string>;
 
 const DOCUMENT_TYPES = ['impact-report'] as const;
 const TONES = ['professional', 'accessible', 'engaging', 'authoritative', 'empathetic', 'concise'];
@@ -13,11 +22,11 @@ const IMAGE_SOURCING = ['upload', 'curated', 'ai-generated', 'mixed'] as const;
 const PRIVACY_LEVELS = ['public', 'internal', 'confidential', 'restricted'] as const;
 
 export function IntentEditor() {
-  const { project, setProject } = useProject();
+  const { project } = useProject();
   const { announce } = useAnnouncements();
 
   const [intent, setIntent] = useState<IntentContract | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
@@ -27,23 +36,24 @@ export function IntentEditor() {
     }
   }, [project]);
 
-  const validate = (data: IntentContract): Record<string, string> => {
-    const newErrors: Record<string, string> = {};
+  const validate = (data: IntentContract): FieldErrors => {
+    const newErrors: FieldErrors = {};
 
-    if (!data.purpose || data.purpose.length < 10) {
-      newErrors.purpose = 'Purpose must be at least 10 characters';
+    if (data.purpose.trim().length < 10) {
+      newErrors['purpose'] = 'Purpose must be at least 10 characters';
     }
-    if (!data.audience || data.audience.length < 5) {
-      newErrors.audience = 'Audience must be at least 5 characters';
+    if (data.audience.trim().length < 5) {
+      newErrors['audience'] = 'Audience must be at least 5 characters';
     }
-    if (!data.primaryMessage || data.primaryMessage.length < 10) {
-      newErrors.primaryMessage = 'Primary message must be at least 10 characters';
+    if (data.primaryMessage.trim().length < 10) {
+      newErrors['primaryMessage'] = 'Primary message must be at least 10 characters';
     }
-    if (data.brandColors && Object.keys(data.brandColors).length > 0) {
-      for (const [key, value] of Object.entries(data.brandColors)) {
-        if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
-          newErrors[`brandColors.${key}`] = `Invalid hex color: ${value}`;
-        }
+
+    // Hex colours are validated here as well as in the schema, so the user sees
+    // which swatch is wrong rather than a single form-level rejection.
+    for (const [key, value] of Object.entries(data.brandColors)) {
+      if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+        newErrors[`brandColors.${key}`] = `Invalid hex colour: ${value}`;
       }
     }
 
@@ -58,11 +68,23 @@ export function IntentEditor() {
     setIsDirty(true);
   };
 
-  const handleNestedChange = <T extends object>(parent: keyof IntentContract, field: string, value: any) => {
+  /** Updates one key inside a record-valued field, e.g. `brandColors.primary`. */
+  const handleRecordChange = (
+    parent: 'brandColors' | 'brandFonts',
+    field: string,
+    value: string
+  ) => {
     if (!intent) return;
-    const parentObj = intent[parent] as T;
-    const newParent = { ...parentObj, [field]: value };
-    handleChange(parent, newParent as any);
+    handleChange(parent, { ...intent[parent], [field]: value });
+  };
+
+  /** Toggles one export target. */
+  const handleExportRequirementChange = (
+    field: keyof IntentContract['exportRequirements'],
+    value: boolean
+  ) => {
+    if (!intent) return;
+    handleChange('exportRequirements', { ...intent.exportRequirements, [field]: value });
   };
 
   const handleSave = () => {
@@ -133,7 +155,9 @@ export function IntentEditor() {
             <select
               id="document-type"
               value={intent.documentType}
-              onChange={e => handleChange('documentType', e.target.value as any)}
+              onChange={(e) => {
+                handleChange('documentType', e.target.value as IntentContract['documentType']);
+              }}
               disabled={true}
               className="form-input"
             >
@@ -146,13 +170,13 @@ export function IntentEditor() {
             <textarea
               id="purpose"
               value={intent.purpose}
-              onChange={e => handleChange('purpose', e.target.value)}
+              onChange={e => { handleChange('purpose', e.target.value); }}
               rows={3}
               className="form-textarea"
-              aria-describedby={errors.purpose ? 'purpose-error' : undefined}
-              aria-invalid={!!errors.purpose}
+              aria-describedby={errors['purpose'] ? 'purpose-error' : undefined}
+              aria-invalid={!!errors['purpose']}
             />
-            {errors.purpose && <span id="purpose-error" className="form-error">{errors.purpose}</span>}
+            {errors['purpose'] && <span id="purpose-error" className="form-error">{errors['purpose']}</span>}
           </div>
 
           <div className="form-group">
@@ -160,13 +184,13 @@ export function IntentEditor() {
             <textarea
               id="audience"
               value={intent.audience}
-              onChange={e => handleChange('audience', e.target.value)}
+              onChange={e => { handleChange('audience', e.target.value); }}
               rows={2}
               className="form-textarea"
-              aria-describedby={errors.audience ? 'audience-error' : undefined}
-              aria-invalid={!!errors.audience}
+              aria-describedby={errors['audience'] ? 'audience-error' : undefined}
+              aria-invalid={!!errors['audience']}
             />
-            {errors.audience && <span id="audience-error" className="form-error">{errors.audience}</span>}
+            {errors['audience'] && <span id="audience-error" className="form-error">{errors['audience']}</span>}
           </div>
 
           <div className="form-group">
@@ -174,13 +198,13 @@ export function IntentEditor() {
             <textarea
               id="primary-message"
               value={intent.primaryMessage}
-              onChange={e => handleChange('primaryMessage', e.target.value)}
+              onChange={e => { handleChange('primaryMessage', e.target.value); }}
               rows={3}
               className="form-textarea"
-              aria-describedby={errors.primaryMessage ? 'primary-message-error' : undefined}
-              aria-invalid={!!errors.primaryMessage}
+              aria-describedby={errors['primaryMessage'] ? 'primary-message-error' : undefined}
+              aria-invalid={!!errors['primaryMessage']}
             />
-            {errors.primaryMessage && <span id="primary-message-error" className="form-error">{errors.primaryMessage}</span>}
+            {errors['primaryMessage'] && <span id="primary-message-error" className="form-error">{errors['primaryMessage']}</span>}
           </div>
 
           <div className="form-group">
@@ -205,7 +229,7 @@ export function IntentEditor() {
                   }} aria-label={`Remove message ${i + 1}`}>✕</button>
                 </div>
               ))}
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleChange('secondaryMessages', [...intent.secondaryMessages, ''])}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { handleChange('secondaryMessages', [...intent.secondaryMessages, '']); }}>
                 + Add Message
               </button>
             </div>
@@ -216,7 +240,7 @@ export function IntentEditor() {
             <select
               id="tone"
               value={intent.tone}
-              onChange={e => handleChange('tone', e.target.value)}
+              onChange={e => { handleChange('tone', e.target.value); }}
               className="form-select"
             >
               {TONES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -245,7 +269,7 @@ export function IntentEditor() {
                   }} aria-label={`Remove concept ${i + 1}`}>✕</button>
                 </div>
               ))}
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleChange('conceptsToAvoid', [...intent.conceptsToAvoid, ''])}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { handleChange('conceptsToAvoid', [...intent.conceptsToAvoid, '']); }}>
                 + Add Concept
               </button>
             </div>
@@ -256,7 +280,7 @@ export function IntentEditor() {
             <textarea
               id="visual-style"
               value={intent.visualStyle}
-              onChange={e => handleChange('visualStyle', e.target.value)}
+              onChange={e => { handleChange('visualStyle', e.target.value); }}
               rows={2}
               className="form-textarea"
             />
@@ -284,7 +308,7 @@ export function IntentEditor() {
                   }} aria-label={`Remove visual ${i + 1}`}>✕</button>
                 </div>
               ))}
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleChange('requiredVisuals', [...intent.requiredVisuals, ''])}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { handleChange('requiredVisuals', [...intent.requiredVisuals, '']); }}>
                 + Add Visual
               </button>
             </div>
@@ -312,7 +336,7 @@ export function IntentEditor() {
                   }} aria-label={`Remove requirement ${i + 1}`}>✕</button>
                 </div>
               ))}
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleChange('accessibilityRequirements', [...intent.accessibilityRequirements, ''])}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { handleChange('accessibilityRequirements', [...intent.accessibilityRequirements, '']); }}>
                 + Add Requirement
               </button>
             </div>
@@ -323,7 +347,12 @@ export function IntentEditor() {
             <select
               id="image-sourcing"
               value={intent.imageSourcingPreference}
-              onChange={e => handleChange('imageSourcingPreference', e.target.value as any)}
+              onChange={(e) => {
+                handleChange(
+                  'imageSourcingPreference',
+                  e.target.value as IntentContract['imageSourcingPreference']
+                );
+              }}
               className="form-select"
             >
               {IMAGE_SOURCING.map(s => <option key={s} value={s}>{s}</option>)}
@@ -335,7 +364,12 @@ export function IntentEditor() {
             <select
               id="privacy-sensitivity"
               value={intent.privacySensitivity}
-              onChange={e => handleChange('privacySensitivity', e.target.value as any)}
+              onChange={(e) => {
+                handleChange(
+                  'privacySensitivity',
+                  e.target.value as IntentContract['privacySensitivity']
+                );
+              }}
               className="form-select"
             >
               {PRIVACY_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
@@ -350,7 +384,7 @@ export function IntentEditor() {
                   <input
                     type="checkbox"
                     checked={intent.exportRequirements.pdf}
-                    onChange={e => handleNestedChange('exportRequirements', 'pdf', e.target.checked)}
+                    onChange={e => { handleExportRequirementChange('pdf', e.target.checked); }}
                   />
                   PDF
                 </label>
@@ -358,7 +392,7 @@ export function IntentEditor() {
                   <input
                     type="checkbox"
                     checked={intent.exportRequirements.html}
-                    onChange={e => handleNestedChange('exportRequirements', 'html', e.target.checked)}
+                    onChange={e => { handleExportRequirementChange('html', e.target.checked); }}
                   />
                   Accessible HTML
                 </label>
@@ -366,7 +400,7 @@ export function IntentEditor() {
                   <input
                     type="checkbox"
                     checked={intent.exportRequirements.svgDiagrams}
-                    onChange={e => handleNestedChange('exportRequirements', 'svgDiagrams', e.target.checked)}
+                    onChange={e => { handleExportRequirementChange('svgDiagrams', e.target.checked); }}
                   />
                   SVG Diagrams
                 </label>
@@ -374,7 +408,7 @@ export function IntentEditor() {
                   <input
                     type="checkbox"
                     checked={intent.exportRequirements.chartTables}
-                    onChange={e => handleNestedChange('exportRequirements', 'chartTables', e.target.checked)}
+                    onChange={e => { handleExportRequirementChange('chartTables', e.target.checked); }}
                   />
                   Chart Data Tables
                 </label>
@@ -393,13 +427,13 @@ export function IntentEditor() {
                       id={`color-${key}`}
                       type="color"
                       value={value}
-                      onChange={e => handleNestedChange('brandColors', key, e.target.value)}
+                      onChange={e => { handleRecordChange('brandColors', key, e.target.value); }}
                       className="form-input color-input"
                     />
                     <input
                       type="text"
                       value={value}
-                      onChange={e => handleNestedChange('brandColors', key, e.target.value)}
+                      onChange={e => { handleRecordChange('brandColors', key, e.target.value); }}
                       className="form-input"
                       pattern="^#[0-9A-Fa-f]{6}$"
                     />
@@ -430,7 +464,7 @@ export function IntentEditor() {
                       id={`font-${key}`}
                       type="text"
                       value={value}
-                      onChange={e => handleNestedChange('brandFonts', key, e.target.value)}
+                      onChange={e => { handleRecordChange('brandFonts', key, e.target.value); }}
                       className="form-input"
                     />
                     <button type="button" className="icon-btn" onClick={() => {

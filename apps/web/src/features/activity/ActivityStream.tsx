@@ -2,11 +2,11 @@
 // Agent Activity Stream
 // ============================================================================
 
-import React, { useMemo } from 'react';
+import { activityRecorder, type AgentActivityEntry } from '@vistect/webmcp';
+import { useEffect, useMemo, useState } from 'react';
+
+
 import { useProject } from '../../state';
-import { activityRecorder } from '@vistect/webmcp/activity';
-import type { AgentActivityEntry } from '@vistect/webmcp/activity';
-import { useAnnouncements } from '../../app/Providers';
 
 const TOOL_ICONS: Record<string, string> = {
   create: '➕',
@@ -44,11 +44,21 @@ const STATUS_COLORS = {
 
 export function ActivityStream({ id }: { id: string }) {
   const { project } = useProject();
-  const { announce } = useAnnouncements();
 
-  // Get entries from recorder
-  const entries = useMemo(() => activityRecorder.getEntries({ limit: 100 }), []);
+  const [entries, setEntries] = useState<AgentActivityEntry[]>(() =>
+    activityRecorder.getEntries({ limit: 100 })
+  );
   const [filter, setFilter] = useState<'all' | 'success' | 'error'>('all');
+
+  // Subscribed, not read once: a `useMemo` snapshot never updated, so the stream
+  // silently stopped reflecting agent activity after mount.
+  useEffect(
+    () =>
+      activityRecorder.subscribe(() => {
+        setEntries(activityRecorder.getEntries({ limit: 100 }));
+      }),
+    []
+  );
 
   const filteredEntries = useMemo(() => {
     if (filter === 'all') return entries;
@@ -60,9 +70,9 @@ export function ActivityStream({ id }: { id: string }) {
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
-  const getToolIcon = (toolName: string) => {
-    const prefix = toolName.split('_')[0];
-    return TOOL_ICONS[prefix] || '⚙️';
+  const getToolIcon = (toolName: string): string => {
+    const prefix = toolName.split('_')[0] ?? '';
+    return TOOL_ICONS[prefix] ?? '⚙️';
   };
 
   const formatTimestamp = (iso: string) => {
@@ -88,21 +98,21 @@ export function ActivityStream({ id }: { id: string }) {
         <div className="stream-filters">
           <button
             className={filter === 'all' ? 'active' : ''}
-            onClick={() => setFilter('all')}
+            onClick={() => { setFilter('all'); }}
             aria-pressed={filter === 'all'}
           >
             All ({entries.length})
           </button>
           <button
             className={filter === 'success' ? 'active' : ''}
-            onClick={() => setFilter('success')}
+            onClick={() => { setFilter('success'); }}
             aria-pressed={filter === 'success'}
           >
             ✓ Success ({entries.filter(e => e.status === 'success').length})
           </button>
           <button
             className={filter === 'error' ? 'active' : ''}
-            onClick={() => setFilter('error')}
+            onClick={() => { setFilter('error'); }}
             aria-pressed={filter === 'error'}
           >
             ✗ Errors ({entries.filter(e => e.status === 'error').length})
@@ -110,15 +120,15 @@ export function ActivityStream({ id }: { id: string }) {
         </div>
       </header>
 
-      <div className="stream-entries" role="list">
+      <div className="stream-entries">
         {filteredEntries.length === 0 ? (
           <div className="empty-state">
             <p>No activity entries</p>
           </div>
         ) : (
-          <ul role="list" aria-label="Activity entries">
+          <ul aria-label="Activity entries">
             {filteredEntries.map(entry => (
-              <li key={entry.id} role="listitem" className={`stream-entry ${entry.status}`}>
+              <li key={entry.id} className={`stream-entry ${entry.status}`}>
                 <div className="entry-header">
                   <span className="entry-time">{formatTimestamp(entry.timestamp)}</span>
                   <span className="entry-tool" style={{ color: STATUS_COLORS[entry.status] }}>
@@ -152,20 +162,10 @@ export function ActivityStream({ id }: { id: string }) {
 
       <footer className="stream-footer">
         <span className="entry-count">{filteredEntries.length} of {entries.length} entries shown</span>
-        <button className="btn btn-secondary btn-sm" onClick={() => activityRecorder.clear()}>
+        <button className="btn btn-secondary btn-sm" onClick={() => { activityRecorder.clear(); }}>
           Clear Stream
         </button>
       </footer>
     </section>
   );
-}
-
-function useState<T>(initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
-  // This would be replaced with React's useState
-  // For now, using a simple implementation
-  let state = initial;
-  const setState = (newState: T | ((prev: T) => T)) => {
-    state = typeof newState === 'function' ? (newState as (prev: T) => T)(state) : newState;
-  };
-  return [state, setState];
 }

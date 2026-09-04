@@ -2,10 +2,12 @@
 // Warning/Validation Queue (Alt+W)
 // ============================================================================
 
-import React, { useMemo } from 'react';
-import { useProject, useProjectFindings } from '../../state';
-import type { ValidationFinding, FindingSeverity, FindingStatus } from '@vistect/domain/schema';
+import type { FindingSeverity, FindingStatus, ObjectId, PageId } from '@vistect/domain/schema';
+import { useMemo } from 'react';
+
+
 import { useAnnouncements } from '../../app/Providers';
+import { useProject, useProjectFindings } from '../../state';
 
 const SEVERITY_LABELS: Record<FindingSeverity, string> = {
   info: 'Info',
@@ -105,7 +107,7 @@ export function WarningQueue({ id }: { id: string }) {
   const warningCount = openFindings.filter(f => f.severity === 'warning').length;
 
   return (
-    <section id={id} className="warning-queue" aria-label="Warning queue" role="region" aria-live="polite">
+    <section id={id} className="warning-queue" aria-label="Warning queue" aria-live="polite">
       <header className="queue-header">
         <h2>Validation Findings</h2>
         <div className="queue-summary">
@@ -130,14 +132,14 @@ export function WarningQueue({ id }: { id: string }) {
       <div className="queue-filters">
         <button
           className={filter === 'all' ? 'active' : ''}
-          onClick={() => setFilter('all')}
+          onClick={() => { setFilter('all'); }}
           aria-pressed={filter === 'all'}
         >
           All ({filteredFindings.length})
         </button>
         <button
           className={filter === 'blocking' ? 'active' : ''}
-          onClick={() => setFilter('blocking')}
+          onClick={() => { setFilter('blocking'); }}
           aria-pressed={filter === 'blocking'}
           style={{ borderLeftColor: SEVERITY_COLORS.blocking }}
         >
@@ -145,7 +147,7 @@ export function WarningQueue({ id }: { id: string }) {
         </button>
         <button
           className={filter === 'error' ? 'active' : ''}
-          onClick={() => setFilter('error')}
+          onClick={() => { setFilter('error'); }}
           aria-pressed={filter === 'error'}
           style={{ borderLeftColor: SEVERITY_COLORS.error }}
         >
@@ -153,7 +155,7 @@ export function WarningQueue({ id }: { id: string }) {
         </button>
         <button
           className={filter === 'warning' ? 'active' : ''}
-          onClick={() => setFilter('warning')}
+          onClick={() => { setFilter('warning'); }}
           aria-pressed={filter === 'warning'}
           style={{ borderLeftColor: SEVERITY_COLORS.warning }}
         >
@@ -161,7 +163,7 @@ export function WarningQueue({ id }: { id: string }) {
         </button>
         <button
           className={filter === 'info' ? 'active' : ''}
-          onClick={() => setFilter('info')}
+          onClick={() => { setFilter('info'); }}
           aria-pressed={filter === 'info'}
           style={{ borderLeftColor: SEVERITY_COLORS.info }}
         >
@@ -169,49 +171,53 @@ export function WarningQueue({ id }: { id: string }) {
         </button>
         <button
           className={filter === 'open' ? 'active' : ''}
-          onClick={() => setFilter('open')}
+          onClick={() => { setFilter('open'); }}
           aria-pressed={filter === 'open'}
         >
           Open ({openFindings.length})
         </button>
         <button
           className={filter === 'resolved' ? 'active' : ''}
-          onClick={() => setFilter('resolved')}
+          onClick={() => { setFilter('resolved'); }}
           aria-pressed={filter === 'resolved'}
         >
           Resolved ({findings.filter(f => f.status === 'resolved').length})
         </button>
         <button
           className={filter === 'accepted' ? 'active' : ''}
-          onClick={() => setFilter('accepted')}
+          onClick={() => { setFilter('accepted'); }}
           aria-pressed={filter === 'accepted'}
         >
           Accepted ({findings.filter(f => f.status === 'accepted').length})
         </button>
         <button
           className={filter === 'dismissed' ? 'active' : ''}
-          onClick={() => setFilter('dismissed')}
+          onClick={() => { setFilter('dismissed'); }}
           aria-pressed={filter === 'dismissed'}
         >
           Dismissed ({findings.filter(f => f.status === 'dismissed').length})
         </button>
       </div>
 
-      <div className="queue-list" role="list" aria-label="Validation findings">
+      <div className="queue-list">
         {filteredFindings.length === 0 ? (
           <div className="empty-state">
             <h3>No findings</h3>
             <p>All validations passing</p>
           </div>
         ) : (
-          <ul role="list">
-            {filteredFindings.map(finding => {
+          <ul aria-label="Validation findings">
+            {filteredFindings.map((finding) => {
               const isExpanded = expandedIds.has(finding.id);
-              const targetObj = project.objects[finding.targetId as string];
-              const targetPage = project.pages[finding.targetId as string];
+              // A finding targets an object, a page, or the document; only one
+              // lookup can succeed, and the scope tells us which to try.
+              const targetObj =
+                finding.scope === 'object' ? project.objects[finding.targetId as ObjectId] : undefined;
+              const targetPage =
+                finding.scope === 'page' ? project.pages[finding.targetId as PageId] : undefined;
 
               return (
-                <li key={finding.id} className={`finding-card ${finding.severity} ${finding.status}`} role="listitem" style={{ borderLeftColor: SEVERITY_COLORS[finding.severity] }}>
+                <li key={finding.id} className={`finding-card ${finding.severity} ${finding.status}`} style={{ borderLeftColor: SEVERITY_COLORS[finding.severity] }}>
                   <div className="finding-header">
                     <span className="finding-severity-icon" aria-hidden="true">{SEVERITY_ICONS[finding.severity]}</span>
                     <span className="finding-category">{finding.category}</span>
@@ -253,17 +259,17 @@ export function WarningQueue({ id }: { id: string }) {
 
                   <div className="finding-actions-bar">
                     {finding.status === 'open' && finding.severity !== 'blocking' && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleAccept(finding.id)}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => { handleAccept(finding.id); }}>
                         Accept Risk
                       </button>
                     )}
                     {finding.status === 'open' && finding.severity !== 'blocking' && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleDismiss(finding.id)}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => { handleDismiss(finding.id); }}>
                         Dismiss
                       </button>
                     )}
                     {finding.status === 'open' && (
-                      <button className="btn btn-primary btn-sm" onClick={() => handleResolve(finding.id)}>
+                      <button className="btn btn-primary btn-sm" onClick={() => { handleResolve(finding.id); }}>
                         Resolve
                       </button>
                     )}
@@ -284,7 +290,7 @@ export function WarningQueue({ id }: { id: string }) {
                     )}
                     <button
                       className="btn btn-ghost btn-sm"
-                      onClick={() => toggleExpanded(finding.id)}
+                      onClick={() => { toggleExpanded(finding.id); }}
                     >
                       {isExpanded ? 'Hide' : 'Details'}
                     </button>

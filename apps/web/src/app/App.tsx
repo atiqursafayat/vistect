@@ -2,43 +2,48 @@
 // Main App Component
 // ============================================================================
 
-import React, { useEffect, useCallback } from 'react';
-import { useProject } from './Providers';
-import { useAnnouncements } from './Providers';
-import { useWebMCP } from './Providers';
-import { Navigator } from '../features/navigator/Navigator';
-import { Explorer } from '../features/explorer/Explorer';
-import { IntentEditor } from '../features/intent/IntentEditor';
-import { Editor } from '../features/editor/Editor';
+import { useEffect } from 'react';
+
 import { ActivityStream } from '../features/activity/ActivityStream';
 import { DecisionQueue } from '../features/decisions/DecisionQueue';
-import { WarningQueue } from '../features/validation/WarningQueue';
+import { Editor } from '../features/editor/Editor';
+import { Explorer } from '../features/explorer/Explorer';
+import { IntentEditor } from '../features/intent/IntentEditor';
+import { Navigator } from '../features/navigator/Navigator';
 import { PrivacyCenter } from '../features/privacy/PrivacyCenter';
-import { ShortcutHelp } from '../ui/ShortcutHelp';
+import { WarningQueue } from '../features/validation/WarningQueue';
+import { useStore, type ViewMode } from '../state';
 import { Layout } from '../ui/Layout';
-import { useStore } from '../state';
-import { createHumanActor } from '@vistect/domain/schema';
+import { ShortcutHelp } from '../ui/ShortcutHelp';
+import { Welcome } from '../ui/Welcome';
+
+import { useAnnouncements, useProject, useWebMCP } from './Providers';
 
 // ============================================================================
 // Keyboard Shortcuts
 // ============================================================================
 
-const SHORTCUTS = {
-  'Alt+U': 'Open decision queue',
-  'Alt+W': 'Open warning queue',
-  'Alt+A': 'Open activity stream',
-  'Alt+N': 'Open navigator',
-  'Alt+O': 'Open object explorer',
-  'Alt+P': 'Open privacy center',
-  'Escape': 'Close dialog / cancel',
-  '?': 'Show shortcut help',
-} as const;
+/**
+ * Alt-key view shortcuts (§21.2).
+ *
+ * Alt rather than Ctrl: Ctrl combinations collide with screen reader command
+ * layers, which would make the shortcut unreachable for the primary audience.
+ */
+const VIEW_SHORTCUTS: Readonly<Record<string, { view: ViewMode; label: string }>> = {
+  u: { view: 'decisions', label: 'Decision queue' },
+  w: { view: 'warnings', label: 'Warning queue' },
+  a: { view: 'activity', label: 'Activity stream' },
+  n: { view: 'navigator', label: 'Navigator' },
+  o: { view: 'explorer', label: 'Object explorer' },
+  p: { view: 'privacy', label: 'Privacy centre' },
+};
 
 export function App() {
-  const { project, setProject, isLoading } = useProject();
+  const { project, isLoading } = useProject();
   const { announce } = useAnnouncements();
   const { isAvailable, registerTools, unregisterTools } = useWebMCP();
-  const { currentView, setCurrentView, openProject } = useStore();
+  const currentView = useStore((state) => state.currentView);
+  const setCurrentView = useStore((state) => state.setCurrentView);
 
   // Register WebMCP tools when project changes
   useEffect(() => {
@@ -56,44 +61,28 @@ export function App() {
       // Don't trigger shortcuts when typing in inputs
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      const key = e.key;
-      const alt = e.altKey;
       const ctrl = e.ctrlKey || e.metaKey;
 
-      if (alt && key === 'u') {
-        e.preventDefault();
-        setCurrentView('decisions');
-        announce('Decision queue opened');
-      } else if (alt && key === 'w') {
-        e.preventDefault();
-        setCurrentView('warnings');
-        announce('Warning queue opened');
-      } else if (alt && key === 'a') {
-        e.preventDefault();
-        setCurrentView('activity');
-        announce('Activity stream opened');
-      } else if (alt && key === 'n') {
-        e.preventDefault();
-        setCurrentView('navigator');
-        announce('Navigator opened');
-      } else if (alt && key === 'o') {
-        e.preventDefault();
-        setCurrentView('explorer');
-        announce('Object explorer opened');
-      } else if (alt && key === 'p') {
-        e.preventDefault();
-        setCurrentView('privacy');
-        announce('Privacy center opened');
-      } else if (key === '?' && !alt && !ctrl) {
+      if (e.altKey && !ctrl) {
+        const shortcut = VIEW_SHORTCUTS[e.key.toLowerCase()];
+        if (shortcut !== undefined) {
+          e.preventDefault();
+          setCurrentView(shortcut.view);
+          announce(`${shortcut.label} opened`);
+        }
+        return;
+      }
+
+      if (e.key === '?' && !ctrl) {
         e.preventDefault();
         setCurrentView('shortcuts');
-      } else if (key === 'Escape') {
+      } else if (e.key === 'Escape') {
         setCurrentView('editor');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => { window.removeEventListener('keydown', handleKeyDown); };
   }, [setCurrentView, announce]);
 
   // Announce WebMCP status
@@ -106,35 +95,26 @@ export function App() {
   if (isLoading) {
     return (
       <Layout>
-        <div className="loading-screen" role="status" aria-live="polite">
+        <output className="loading-screen" aria-live="polite">
           <div className="spinner" aria-hidden="true" />
-          <p>Loading Vistect...</p>
-        </div>
+          <p>Loading Vistect…</p>
+        </output>
       </Layout>
     );
   }
 
   return (
     <Layout>
-      {/* Skip links */}
-      <nav className="skip-links" aria-label="Skip links">
-        <a href="#navigator" className="skip-link">Skip to navigator</a>
-        <a href="#explorer" className="skip-link">Skip to object explorer</a>
-        <a href="#editor" className="skip-link">Skip to editor</a>
-        <a href="#decisions" className="skip-link">Skip to decisions</a>
-        <a href="#warnings" className="skip-link">Skip to warnings</a>
-      </nav>
-
       {/* Live regions */}
-      <div id="live-polite" role="status" aria-live="polite" aria-atomic="true" className="sr-only" />
+      <output id="live-polite" aria-live="polite" aria-atomic="true" className="sr-only" />
       <div id="live-assertive" role="alert" aria-live="assertive" aria-atomic="true" className="sr-only" />
 
-      {/* Main navigation */}
+      {/* Persistent navigator, always available for keyboard traversal */}
       <Navigator id="navigator" />
 
-      {/* Main content area */}
-      <main id="main-content" role="main">
-        {currentView === 'navigator' && <Navigator />}
+      <main id="main-content">
+        {currentView === 'welcome' && <Welcome />}
+        {currentView === 'navigator' && <Navigator id="navigator-main" />}
         {currentView === 'explorer' && <Explorer id="explorer" />}
         {currentView === 'intent' && <IntentEditor />}
         {currentView === 'editor' && <Editor id="editor" />}
@@ -142,11 +122,15 @@ export function App() {
         {currentView === 'warnings' && <WarningQueue id="warnings" />}
         {currentView === 'activity' && <ActivityStream id="activity" />}
         {currentView === 'privacy' && <PrivacyCenter id="privacy" />}
-        {currentView === 'shortcuts' && <ShortcutHelp />}
+        <ShortcutHelp
+          isOpen={currentView === 'shortcuts'}
+          onClose={() => {
+            setCurrentView('editor');
+          }}
+        />
       </main>
 
-      {/* Status bar */}
-      <footer className="status-bar" role="contentinfo">
+      <footer className="status-bar">
         <div className="status-item">
           <span className={project ? 'connected' : 'disconnected'} aria-hidden="true" />
           <span>{project ? `Project: ${project.title}` : 'No project open'}</span>

@@ -2,10 +2,18 @@
 // Semantic Object Explorer
 // ============================================================================
 
-import React, { useMemo, useState } from 'react';
-import { useProject, useProjectObjects, useProjectDecisions, useProjectFindings, useUnapprovedDecisionCount } from '../../state';
-import type { DocumentObject, ObjectKind, ApprovalState, FindingSeverity } from '@vistect/domain/schema';
+import type { ApprovalState, FindingSeverity, ObjectId, ObjectKind } from '@vistect/domain/schema';
+import { useMemo, useState } from 'react';
+
+
 import { useAnnouncements } from '../../app/Providers';
+import {
+  useProject,
+  useProjectDecisions,
+  useProjectFindings,
+  useProjectObjects,
+  useUnapprovedDecisionCount,
+} from '../../state';
 
 const KIND_LABELS: Record<ObjectKind, string> = {
   text: 'Text',
@@ -15,16 +23,6 @@ const KIND_LABELS: Record<ObjectKind, string> = {
   diagram: 'Diagram',
   table: 'Table',
   shape: 'Shape',
-};
-
-const KIND_ICONS: Record<ObjectKind, string> = {
-  text: '📝',
-  image: '🖼️',
-  icon: '⭐',
-  chart: '📊',
-  diagram: '🔗',
-  table: '📋',
-  shape: '🔷',
 };
 
 const APPROVAL_LABELS: Record<ApprovalState, string> = {
@@ -95,13 +93,11 @@ export function Explorer({ id }: { id: string }) {
     });
   };
 
-  const getObjectWarnings = (objectId: string) => {
-    return findings.filter(f => f.targetId === objectId && f.status === 'open');
-  };
+  const getObjectWarnings = (objectId: ObjectId) =>
+    findings.filter((f) => f.targetId === objectId && f.status === 'open');
 
-  const getObjectDecisions = (objectId: string) => {
-    return decisions.filter(d => d.targetObjectIds.includes(objectId));
-  };
+  const getObjectDecisions = (objectId: ObjectId) =>
+    decisions.filter((d) => d.targetObjectIds.includes(objectId));
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -136,7 +132,9 @@ export function Explorer({ id }: { id: string }) {
           <select
             id="filter-kind"
             value={filter.kind}
-            onChange={e => setFilter(prev => ({ ...prev, kind: e.target.value as any }))}
+            onChange={(e) => {
+              setFilter((prev) => ({ ...prev, kind: e.target.value as ObjectKind | 'all' }));
+            }}
             aria-label="Filter by object kind"
           >
             <option value="all">All kinds</option>
@@ -155,7 +153,9 @@ export function Explorer({ id }: { id: string }) {
           <select
             id="filter-approval"
             value={filter.approval}
-            onChange={e => setFilter(prev => ({ ...prev, approval: e.target.value as any }))}
+            onChange={(e) => {
+              setFilter((prev) => ({ ...prev, approval: e.target.value as ApprovalState | 'all' }));
+            }}
             aria-label="Filter by approval status"
           >
             <option value="all">All statuses</option>
@@ -171,7 +171,7 @@ export function Explorer({ id }: { id: string }) {
           <input
             type="checkbox"
             checked={filter.hasWarnings}
-            onChange={e => setFilter(prev => ({ ...prev, hasWarnings: e.target.checked }))}
+            onChange={e => { setFilter(prev => ({ ...prev, hasWarnings: e.target.checked })); }}
             aria-label="Show only objects with warnings"
           />
             <span>Warnings only</span>
@@ -184,7 +184,7 @@ export function Explorer({ id }: { id: string }) {
             type="search"
             placeholder="Search objects..."
             value={filter.search}
-            onChange={e => setFilter(prev => ({ ...prev, search: e.target.value }))}
+            onChange={e => { setFilter(prev => ({ ...prev, search: e.target.value })); }}
             aria-label="Search objects by purpose or ID"
           />
         </div>
@@ -196,7 +196,7 @@ export function Explorer({ id }: { id: string }) {
             <p>No objects match current filters</p>
           </div>
         ) : (
-          <ul role="group" aria-label="Objects">
+          <ul aria-label="Objects">
             {filteredObjects.map(obj => {
               const warnings = getObjectWarnings(obj.id);
               const objDecisions = getObjectDecisions(obj.id);
@@ -206,27 +206,38 @@ export function Explorer({ id }: { id: string }) {
               const hasBlockingFindings = warnings.some(w => w.severity === 'blocking' && w.status === 'open');
 
               return (
-                <li key={obj.id} role="treeitem" aria-level={2} aria-expanded={isExpanded} aria-selected={isSelected}>
+                <li key={obj.id}>
                   <div
                     className={`object-row ${isSelected ? 'selected' : ''} ${hasBlockingFindings ? 'blocking' : ''} ${hasOpenWarnings ? 'has-warnings' : ''}`}
-                    onClick={() => handleSelect(obj.id)}
                   >
                     <button
+                      type="button"
                       className="expand-toggle"
-                      onClick={(e) => { e.stopPropagation(); toggleExpanded(obj.id); }}
-                      aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                      onClick={() => {
+                        toggleExpanded(obj.id);
+                      }}
+                      aria-label={
+                        isExpanded ? `Collapse ${obj.purpose}` : `Expand ${obj.purpose}`
+                      }
                       aria-expanded={isExpanded}
                     >
-                      {isExpanded ? '▼' : '▶'}
+                      <span aria-hidden="true">{isExpanded ? '▼' : '▶'}</span>
                     </button>
 
-                    <span className="object-kind-icon" aria-hidden="true">{KIND_ICONS[obj.kind]}</span>
-
-                    <div className="object-info">
+                    {/* Selection is its own button so it is reachable by keyboard;
+                        the row itself is not interactive. */}
+                    <button
+                      type="button"
+                      className="object-select"
+                      onClick={() => {
+                        handleSelect(obj.id);
+                      }}
+                      aria-pressed={isSelected}
+                    >
                       <span className="object-kind">{KIND_LABELS[obj.kind]}</span>
                       <span className="object-purpose">{obj.purpose}</span>
                       <span className="object-id">{obj.id}</span>
-                    </div>
+                    </button>
 
                     <div className="object-status">
                       <span className={`approval-badge ${obj.approval}`}>{APPROVAL_LABELS[obj.approval]}</span>
@@ -241,24 +252,17 @@ export function Explorer({ id }: { id: string }) {
                       )}
                     </div>
 
-                    <button
-                      className="icon-btn actions-btn"
-                      onClick={(e) => { e.stopPropagation(); /* Show actions */ }}
-                      aria-label="Object actions"
-                    >
-                      ⋮
-                    </button>
                   </div>
 
                   {isExpanded && (
-                    <div className="object-details" role="group" aria-label={`${obj.purpose} details`}>
+                    <div className="object-details">
                       <div className="detail-section">
                         <h4>Accessibility</h4>
                         <dl>
                           <dt>Alt text</dt>
-                          <dd>{obj.accessibility.altText || '(none)'}</dd>
+                          <dd>{obj.accessibility.altText ?? '(none)'}</dd>
                           <dt>Long description</dt>
-                          <dd>{obj.accessibility.longDescription || '(none)'}</dd>
+                          <dd>{obj.accessibility.longDescription ?? '(none)'}</dd>
                           <dt>Decorative</dt>
                           <dd>{obj.accessibility.isDecorative ? 'Yes' : 'No'}</dd>
                           <dt>In reading order</dt>

@@ -2,9 +2,13 @@
 // Privacy Center
 // ============================================================================
 
-import React, { useState, useMemo } from 'react';
-import { useProject } from '../../state';
+
+import { dictEntries } from '@vistect/domain/collections';
+import type { AssetId } from '@vistect/domain/schema';
+import { useState } from 'react';
+
 import { useAnnouncements } from '../../app/Providers';
+import { useProject } from '../../state';
 
 interface PrivacyReceipt {
   id: string;
@@ -26,30 +30,49 @@ interface ConsentRequest {
   status: 'pending' | 'approved' | 'rejected' | 'redacted';
 }
 
-export function PrivacyCenter({ id }: { id: string }) {
+export interface PrivacyCenterProps {
+  id: string;
+  /** Records a consent decision for non-local processing (§22). */
+  onConsent?: (requestId: string, approved: boolean) => void;
+  /** Redacts detected faces or text from an asset. */
+  onRedact?: (assetId: AssetId) => void;
+  /** Permanently deletes an asset and its receipts. */
+  onDelete?: (assetId: AssetId) => void;
+}
+
+export function PrivacyCenter({ id, onConsent, onRedact, onDelete }: PrivacyCenterProps) {
   const { project } = useProject();
   const { announce } = useAnnouncements();
 
-  // Mock data - in real implementation, loaded from storage
+  // Receipts and consent requests are persisted in the meta store; the handlers
+  // below are injected so this component stays a pure view.
   const [receipts] = useState<PrivacyReceipt[]>([]);
   const [consentRequests] = useState<ConsentRequest[]>([]);
   const [redactionMode, setRedactionMode] = useState(false);
-  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
+  const [pendingDeletion, setPendingDeletion] = useState<AssetId | null>(null);
 
   const handleConsent = (requestId: string, approved: boolean) => {
-    // Update consent request
+    onConsent?.(requestId, approved);
     announce(approved ? 'Consent granted for remote processing' : 'Consent denied');
   };
 
-  const handleRedact = (assetId: string) => {
-    // Trigger redaction
-    announce('Asset redacted for privacy');
+  const handleRedact = (assetId: AssetId) => {
+    onRedact?.(assetId);
+    announce('Asset redacted');
   };
 
-  const handleDelete = (assetId: string) => {
-    if (confirm('Delete this asset permanently?')) {
-      announce('Asset deleted');
-    }
+  // Two-step deletion rather than `confirm()`: a native dialog cannot be styled,
+  // announced, or focus-managed, and deletion is irreversible.
+  const requestDeletion = (assetId: AssetId) => {
+    setPendingDeletion(assetId);
+    announce('Confirm deletion to permanently remove this asset', 'assertive');
+  };
+
+  const confirmDeletion = () => {
+    if (pendingDeletion === null) return;
+    onDelete?.(pendingDeletion);
+    setPendingDeletion(null);
+    announce('Asset deleted');
   };
 
   const exportReceipts = () => {
@@ -118,11 +141,16 @@ export function PrivacyCenter({ id }: { id: string }) {
       </div>
 
       <div className="privacy-tabs">
-        <nav className="tabs" role="tablist" aria-label="Privacy sections">
-          <button role="tab" aria-selected={true} className="active">Receipts</button>
-          <button role="tab" aria-selected={false}>Consent Requests</button>
-          <button role="tab" aria-selected={false}>Redaction</button>
-          <button role="tab" aria-selected={false}>Deletion</button>
+        {/* Section links rather than a tablist: all four panels are rendered
+            below, so `aria-current` describes position without promising the
+            arrow-key behaviour a real tablist requires. */}
+        <nav className="tabs" aria-label="Privacy sections">
+          <button type="button" aria-current="true" className="active">
+            Receipts
+          </button>
+          <button type="button">Consent requests</button>
+          <button type="button">Redaction</button>
+          <button type="button">Deletion</button>
         </nav>
       </div>
 
@@ -134,9 +162,9 @@ export function PrivacyCenter({ id }: { id: string }) {
               <p>No privacy receipts recorded</p>
             </div>
           ) : (
-            <div className="receipts-list" role="list">
+            <ul className="receipts-list">
               {receipts.map(receipt => (
-                <div key={receipt.id} className="receipt-card" role="listitem">
+                <li key={receipt.id} className="receipt-card">
                   <div className="receipt-header">
                     <span className={`receipt-type ${receipt.processingType}`}>
                       {receipt.processingType === 'local' ? '🔒' : '☁️'} {receipt.processingType.charAt(0).toUpperCase() + receipt.processingType.slice(1)}
@@ -153,9 +181,9 @@ export function PrivacyCenter({ id }: { id: string }) {
                     )}
                     <div>Consent: {receipt.consentGiven ? 'Granted' : 'Denied'}</div>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </section>
 
@@ -166,9 +194,9 @@ export function PrivacyCenter({ id }: { id: string }) {
               <p>No pending consent requests</p>
             </div>
           ) : (
-            <div className="consent-list" role="list">
+            <ul className="consent-list">
               {consentRequests.map(request => (
-                <div key={request.id} className="consent-card" role="listitem">
+                <li key={request.id} className="consent-card">
                   <div className="consent-header">
                     <span className="consent-time">{new Date(request.timestamp).toLocaleString()}</span>
                     <span className={`consent-status ${request.status}`}>{request.status}</span>
@@ -181,10 +209,10 @@ export function PrivacyCenter({ id }: { id: string }) {
                   </div>
                   {request.status === 'pending' && (
                     <div className="consent-actions">
-                      <button className="btn btn-primary btn-sm" onClick={() => handleConsent(request.id, true)}>
+                      <button className="btn btn-primary btn-sm" onClick={() => { handleConsent(request.id, true); }}>
                         Approve
                       </button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleConsent(request.id, false)}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => { handleConsent(request.id, false); }}>
                         Deny
                       </button>
                       <button className="btn btn-ghost btn-sm" onClick={() => {
@@ -194,9 +222,9 @@ export function PrivacyCenter({ id }: { id: string }) {
                       </button>
                     </div>
                   )}
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </section>
 
@@ -206,7 +234,7 @@ export function PrivacyCenter({ id }: { id: string }) {
           <p>Select assets to redact sensitive information before processing</p>
           <div className="redaction-tools">
             <label>
-              <input type="checkbox" checked={redactionMode} onChange={e => setRedactionMode(e.target.checked)} />
+              <input type="checkbox" checked={redactionMode} onChange={e => { setRedactionMode(e.target.checked); }} />
               Enable Redaction Mode
             </label>
             {redactionMode && (
@@ -226,16 +254,21 @@ export function PrivacyCenter({ id }: { id: string }) {
               </div>
             )}
           </div>
-          <div className="asset-list" role="list">
-            {project && Object.entries(project.assets).map(([id, asset]) => (
-              <div key={id} className="asset-item" role="listitem">
-                <span>{asset.fileName}</span>
-                <button className="btn btn-ghost btn-sm" onClick={() => handleRedact(id)}>
-                  Redact
-                </button>
-              </div>
-            ))}
-          </div>
+          <ul className="asset-list">
+            {project !== null &&
+              dictEntries(project.assets).map(([assetId, asset]) => (
+                <li key={assetId} className="asset-item">
+                  <span>{asset.fileName}</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { handleRedact(assetId); }}
+                  >
+                    Redact
+                  </button>
+                </li>
+              ))}
+          </ul>
         </section>
 
         {/* Deletion Panel */}
@@ -245,16 +278,42 @@ export function PrivacyCenter({ id }: { id: string }) {
             <div className="deletion-card">
               <h4>Delete Individual Assets</h4>
               <p>Select assets to permanently remove</p>
-              <div className="asset-list" role="list">
-                {project && Object.entries(project.assets).map(([id, asset]) => (
-                  <div key={id} className="asset-item" role="listitem">
-                    <span>{asset.fileName} ({asset.mimeType})</span>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(id)}>
-                      Delete
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <ul className="asset-list">
+                {project !== null &&
+                  dictEntries(project.assets).map(([assetId, asset]) => (
+                    <li key={assetId} className="asset-item">
+                      <span>
+                        {asset.fileName} ({asset.mimeType})
+                      </span>
+                      {pendingDeletion === assetId ? (
+                        <span className="deletion-confirm">
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={confirmDeletion}
+                          >
+                            Confirm delete
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => { setPendingDeletion(null); }}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => { requestDeletion(assetId); }}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </li>
+                  ))}
+              </ul>
             </div>
 
             <div className="deletion-card warning">

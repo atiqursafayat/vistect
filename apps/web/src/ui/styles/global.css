@@ -20,7 +20,10 @@
 
   --color-text: #1a1a2e;
   --color-text-secondary: #495057;
-  --color-text-muted: #868e96;
+  /* 4.5:1 against every surface it is used on (#ffffff 6.09, #f8f9fa 5.78,
+     #f1f3f5 5.48). The previous #868e96 measured 3.15 on the app background and
+     failed WCAG 1.4.3 wherever it carried real text. */
+  --color-text-muted: #5c636a;
   --color-text-inverse: #ffffff;
 
   --color-border: #dee2e6;
@@ -174,7 +177,9 @@
 
     --color-text: #f8f9fa;
     --color-text-secondary: #adb5bd;
-    --color-text-muted: #868e96;
+    /* #868e96 measures 3.99:1 on --color-surface (#2d2d4a) — below AA. #a9b1b9
+       gives 6.10 on surface, 7.86 on background, 4.81 on surface-hover. */
+    --color-text-muted: #a9b1b9;
     --color-text-inverse: #1a1a2e;
 
     --color-border: #495057;
@@ -628,7 +633,9 @@ kbd {
 
 .sidebar-nav kbd {
   font-size: var(--text-xs);
-  opacity: 0.7;
+  /* No opacity: at 0.7 the inherited #495057 blended to #7e8388 on the kbd's own
+     blended background, measuring 3.56:1 — an axe-serious WCAG 1.4.3 failure.
+     Full opacity on --color-surface-hover measures 7.35:1. */
 }
 
 .main-content {
@@ -690,6 +697,39 @@ kbd {
   height: 8px;
   border-radius: 50%;
   background: var(--color-error);
+}
+
+/* ============================================================================
+   Welcome View
+   ============================================================================ */
+
+.welcome-view {
+  /* Bottom padding clears the fixed status bar so the last paragraph is not
+     hidden behind it. */
+  padding: var(--space-6) var(--space-5) var(--space-10);
+  /* ~70ch keeps prose within the comfortable reading measure (WCAG 1.4.8). */
+  max-width: 70ch;
+}
+
+.welcome-view h1 {
+  margin-top: 0;
+  color: var(--color-primary);
+}
+
+.welcome-view h1:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.welcome-lede {
+  font-size: var(--text-lg);
+  color: var(--color-text-secondary);
+}
+
+.welcome-orientation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
 }
 
 /* ============================================================================
@@ -807,6 +847,63 @@ kbd {
 .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
 .z-modal { z-index: var(--z-modal); }
 .z-tooltip { z-index: var(--z-tooltip); }
+
+/* ============================================================================
+   Narrow Viewport / 400% Zoom Reflow (WCAG 1.4.10)
+   ============================================================================
+
+   At 400% zoom a 1280×1024 viewport becomes 320×256 CSS pixels. The fixed
+   280px-wide sidebar plus the matching `margin-left` on `.main-content` and
+   `left` on `.status-bar` left only 40px for content, forcing horizontal
+   scrolling. Below 640px the sidebar becomes an in-flow block and the offsets
+   collapse, so content reflows into a single column.
+
+   The `.sidebar` width is set inline from the store, so it needs `!important`
+   to be overridden here — the alternative is threading a viewport query through
+   React state, which would duplicate a media query in JavaScript. */
+
+@media (max-width: 640px) {
+  .app-layout {
+    display: block;
+  }
+
+  .sidebar {
+    position: static;
+    width: 100% !important;
+    height: auto;
+    max-height: 50vh;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    overflow-y: auto;
+  }
+
+  .sidebar.closed {
+    /* `translateX(-100%)` would leave the toggle unreachable once the sidebar is
+       in flow; collapsing the box is what "closed" means here. */
+    transform: none;
+    height: 0;
+    max-height: 0;
+    border-bottom: none;
+  }
+
+  .main-content,
+  .sidebar.closed + .main-content {
+    margin-left: 0;
+    min-height: auto;
+  }
+
+  .status-bar,
+  .sidebar.closed + .main-content + .status-bar {
+    position: static;
+    left: auto;
+    right: auto;
+  }
+
+  .status-item {
+    /* Long status text wraps instead of widening the flex row past the viewport. */
+    flex-wrap: wrap;
+  }
+}
 
 /* ============================================================================
    Print Styles

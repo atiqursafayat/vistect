@@ -2,9 +2,12 @@
 // Zustand Store - View/Projection State
 // ============================================================================
 
+
+import { dictValues } from '@vistect/domain/collections';
+import { createActorId } from '@vistect/domain/schema';
+import type { Actor, DocumentProject, VisualDecision } from '@vistect/domain/schema';
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import type { DocumentProject, Actor } from '@vistect/domain/schema';
 
 export type ViewMode =
   | 'welcome'
@@ -39,11 +42,11 @@ interface UIState {
 interface ProjectState {
   project: DocumentProject | null;
   actor: Actor;
-  recentProjects: Array<{ id: string; title: string; updatedAt: string }>;
+  recentProjects: { id: string; title: string; updatedAt: string }[];
 }
 
 interface NotificationState {
-  announcements: Array<{ id: string; message: string; politeness: 'polite' | 'assertive'; timestamp: number }>;
+  announcements: { id: string; message: string; politeness: 'polite' | 'assertive'; timestamp: number }[];
 }
 
 interface AppState extends EditorState, UIState, ProjectState, NotificationState {
@@ -69,7 +72,7 @@ const DEFAULT_SIDEBAR_WIDTH = 280;
 const MAX_RECENT_PROJECTS = 10;
 
 export const useStore = create<AppState>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     // Initial state
     currentView: 'welcome',
     sidebarOpen: true,
@@ -79,7 +82,10 @@ export const useStore = create<AppState>()(
     reducedMotion: false,
     highContrast: false,
     project: null,
-    actor: { id: 'act_user' as any, kind: 'human', label: 'You' },
+    // The default actor is the local human. `kind: 'human'` is what authorises
+    // approval commands (I-03); an agent actor is created separately when a
+    // WebMCP session begins.
+    actor: { id: createActorId(), kind: 'human', label: 'You' },
     recentProjects: [],
     selectedObjectId: null,
     selectedPageId: null,
@@ -88,13 +94,13 @@ export const useStore = create<AppState>()(
     announcements: [],
 
     // Actions
-    setCurrentView: (view) => set({ currentView: view }),
-    toggleSidebar: () => set(state => ({ sidebarOpen: !state.sidebarOpen })),
-    setSidebarWidth: (width) => set({ sidebarWidth: Math.max(200, Math.min(500, width)) }),
-    setPanelHeight: (panel, height) => set(state => ({
+    setCurrentView: (view) => { set({ currentView: view }); },
+    toggleSidebar: () => { set(state => ({ sidebarOpen: !state.sidebarOpen })); },
+    setSidebarWidth: (width) => { set({ sidebarWidth: Math.max(200, Math.min(500, width)) }); },
+    setPanelHeight: (panel, height) => { set(state => ({
       panelHeights: { ...state.panelHeights, [panel]: height },
-    })),
-    setZoomLevel: (zoom) => set({ zoomLevel: Math.max(0.5, Math.min(3, zoom)) }),
+    })); },
+    setZoomLevel: (zoom) => { set({ zoomLevel: Math.max(0.5, Math.min(3, zoom)) }); },
     setReducedMotion: (enabled) => {
       document.body.classList.toggle('reduced-motion', enabled);
       set({ reducedMotion: enabled });
@@ -103,22 +109,22 @@ export const useStore = create<AppState>()(
       document.body.classList.toggle('high-contrast', enabled);
       set({ highContrast: enabled });
     },
-    openProject: (project) => set({ project, currentView: 'editor' }),
-    closeProject: () => set({ project: null, currentView: 'welcome', selectedObjectId: null, selectedPageId: null }),
-    addRecentProject: (project) => set(state => {
+    openProject: (project) => { set({ project, currentView: 'editor' }); },
+    closeProject: () => { set({ project: null, currentView: 'welcome', selectedObjectId: null, selectedPageId: null }); },
+    addRecentProject: (project) => { set(state => {
       const filtered = state.recentProjects.filter(p => p.id !== project.id);
       return { recentProjects: [project, ...filtered].slice(0, MAX_RECENT_PROJECTS) };
-    }),
-    setSelectedObject: (objectId, pageId) => set({ selectedObjectId: objectId, selectedPageId: pageId }),
-    setEditingText: (editing) => set({ editingText: editing }),
-    setDragState: (dragState) => set({ dragState }),
-    announce: (message, politeness = 'polite') => set(state => ({
+    }); },
+    setSelectedObject: (objectId, pageId) => { set({ selectedObjectId: objectId, selectedPageId: pageId }); },
+    setEditingText: (editing) => { set({ editingText: editing }); },
+    setDragState: (dragState) => { set({ dragState }); },
+    announce: (message, politeness = 'polite') => { set(state => ({
       announcements: [
         ...state.announcements.slice(-99),
         { id: `ann_${Date.now()}`, message, politeness, timestamp: Date.now() },
       ],
-    })),
-    clearAnnouncements: () => set({ announcements: [] }),
+    })); },
+    clearAnnouncements: () => { set({ announcements: [] }); },
   }))
 );
 
@@ -136,6 +142,11 @@ export const selectHighContrast = (state: AppState) => state.highContrast;
 export const selectSelectedObject = (state: AppState) => state.selectedObjectId;
 export const selectEditingText = (state: AppState) => state.editingText;
 export const selectAnnouncements = (state: AppState) => state.announcements;
+export const selectSidebarWidth = (state: AppState) => state.sidebarWidth;
+export const selectSelectedPageId = (state: AppState) => state.selectedPageId;
+export const selectPanelHeights = (state: AppState) => state.panelHeights;
+export const selectRecentProjects = (state: AppState) => state.recentProjects;
+export const selectDragState = (state: AppState) => state.dragState;
 
 // ============================================================================
 // Derived State (for projections)
@@ -146,44 +157,68 @@ export function useProjectData<T>(selector: (project: DocumentProject | null) =>
   return selector(project);
 }
 
+/**
+ * The open project plus its actor.
+ *
+ * `project` is nullable: no project is open on the welcome screen, and every
+ * consumer must handle that rather than assume one exists.
+ */
+export function useProject(): { project: DocumentProject | null; actor: Actor } {
+  const project = useStore(selectProject);
+  const actor = useStore(selectActor);
+  return { project, actor };
+}
+
+// `dictValues` drops absent entries: `z.record(BrandedId, …)` infers
+// `Partial<Record<…>>`, so a plain `Object.values` yields `(T | undefined)[]`.
+
 export function useProjectPages() {
-  return useProjectData(project => project ? Object.values(project.pages) : []);
+  return useProjectData((project) => (project ? dictValues(project.pages) : []));
 }
 
 export function useProjectObjects() {
-  return useProjectData(project => project ? Object.values(project.objects) : []);
+  return useProjectData((project) => (project ? dictValues(project.objects) : []));
 }
 
 export function useProjectDecisions() {
-  return useProjectData(project => project ? Object.values(project.decisions) : []);
+  return useProjectData((project) => (project ? dictValues(project.decisions) : []));
 }
 
 export function useProjectFindings() {
-  return useProjectData(project => project ? Object.values(project.findings) : []);
+  return useProjectData((project) => (project ? dictValues(project.findings) : []));
 }
 
 export function useProjectAssets() {
-  return useProjectData(project => project ? Object.values(project.assets) : []);
+  return useProjectData((project) => (project ? dictValues(project.assets) : []));
 }
 
+/** Pages in authored order. `pageOrder` is authoritative, not key order. */
 export function usePageOrder() {
-  return useProjectData(project => project ? project.pageOrder : []);
+  return useProjectData((project) => (project ? project.pageOrder : []));
 }
 
-export function useProjectDecisionsByStatus(status: string) {
-  return useProjectData(project => project
-    ? Object.values(project.decisions).filter(d => d.status === status)
-    : []);
+export function useProjectDecisionsByStatus(status: VisualDecision['status']) {
+  return useProjectData((project) =>
+    project ? dictValues(project.decisions).filter((d) => d.status === status) : []
+  );
 }
 
+/** Count of decisions still awaiting a human verdict (Alt+U queue). */
 export function useUnapprovedDecisionCount() {
-  return useProjectData(project => project
-    ? Object.values(project.decisions).filter(d => d.status !== 'approved' && d.status !== 'rejected').length
-    : 0);
+  return useProjectData((project) =>
+    project
+      ? dictValues(project.decisions).filter(
+          (d) => d.status !== 'approved' && d.status !== 'rejected'
+        ).length
+      : 0
+  );
 }
 
+/** Findings that block export (I-11). */
 export function useOpenBlockingFindings() {
-  return useProjectData(project => project
-    ? Object.values(project.findings).filter(f => f.severity === 'blocking' && f.status === 'open')
-    : []);
+  return useProjectData((project) =>
+    project
+      ? dictValues(project.findings).filter((f) => f.severity === 'blocking' && f.status === 'open')
+      : []
+  );
 }

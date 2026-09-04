@@ -3,6 +3,7 @@
 // ============================================================================
 
 import React from 'react';
+
 import { useStore, selectSidebarOpen, selectSidebarWidth, selectCurrentView } from '../state';
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -12,17 +13,30 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-layout" data-view={currentView}>
+      {/* Skip links must be the first focusable content in the DOM. When they
+          lived inside `children` the sidebar toggle took the first tab stop, so a
+          keyboard user had to traverse the navigation the links exist to bypass
+          (WCAG 2.4.1). */}
+      <nav className="skip-links" aria-label="Skip links">
+        <a href="#main-content" className="skip-link">Skip to main content</a>
+        <a href="#navigator" className="skip-link">Skip to navigator</a>
+        <a href="#explorer" className="skip-link">Skip to object explorer</a>
+        <a href="#editor" className="skip-link">Skip to editor</a>
+        <a href="#decisions" className="skip-link">Skip to decisions</a>
+        <a href="#warnings" className="skip-link">Skip to warnings</a>
+      </nav>
+
       <aside
         className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}
         style={{ width: sidebarOpen ? sidebarWidth : 0 }}
-        role="complementary"
+       
         aria-label="Sidebar"
       >
         <div className="sidebar-header">
           <h2>Vistect</h2>
           <button
             className="sidebar-toggle"
-            onClick={() => useStore.getState().toggleSidebar()}
+            onClick={() => { useStore.getState().toggleSidebar(); }}
             aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             aria-expanded={sidebarOpen}
           >
@@ -34,7 +48,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'navigator' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('navigator')}
+                onClick={() => { useStore.getState().setCurrentView('navigator'); }}
               >
                 <span aria-hidden="true">📋</span> Navigator
                 <kbd>Alt+N</kbd>
@@ -43,7 +57,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'explorer' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('explorer')}
+                onClick={() => { useStore.getState().setCurrentView('explorer'); }}
               >
                 <span aria-hidden="true">🔍</span> Explorer
                 <kbd>Alt+O</kbd>
@@ -52,7 +66,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'intent' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('intent')}
+                onClick={() => { useStore.getState().setCurrentView('intent'); }}
               >
                 <span aria-hidden="true">📝</span> Intent Contract
               </button>
@@ -60,7 +74,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'decisions' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('decisions')}
+                onClick={() => { useStore.getState().setCurrentView('decisions'); }}
               >
                 <span aria-hidden="true">✅</span> Decisions
                 <kbd>Alt+U</kbd>
@@ -69,7 +83,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'warnings' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('warnings')}
+                onClick={() => { useStore.getState().setCurrentView('warnings'); }}
               >
                 <span aria-hidden="true">⚠️</span> Warnings
                 <kbd>Alt+W</kbd>
@@ -78,7 +92,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'activity' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('activity')}
+                onClick={() => { useStore.getState().setCurrentView('activity'); }}
               >
                 <span aria-hidden="true">📊</span> Activity
                 <kbd>Alt+A</kbd>
@@ -87,7 +101,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <li>
               <button
                 className={currentView === 'privacy' ? 'active' : ''}
-                onClick={() => useStore.getState().setCurrentView('privacy')}
+                onClick={() => { useStore.getState().setCurrentView('privacy'); }}
               >
                 <span aria-hidden="true">🔒</span> Privacy
                 <kbd>Alt+P</kbd>
@@ -97,7 +111,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </nav>
       </aside>
 
-      <div className="main-content" role="main">
+      <div className="main-content">
         {children}
       </div>
     </div>
