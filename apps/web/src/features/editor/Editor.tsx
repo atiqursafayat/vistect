@@ -521,16 +521,16 @@ function ObjectProperties({ objectId, pageId, onClose }: ObjectPropertiesProps) 
               type="checkbox"
               checked={formData.isDecorative}
               onChange={e => handleChange('isDecorative', e.target.checked)}
-            >
-              Decorative (exclude from reading order)
+            />
+            Decorative (exclude from reading order)
           </label>
           <label>
             <input
               type="checkbox"
               checked={formData.includedInReadingOrder}
               onChange={e => handleChange('includedInReadingOrder', e.target.checked)}
-            >
-              Include in reading order
+            />
+            Include in reading order
           </label>
         </div>
 
@@ -541,8 +541,4 @@ function ObjectProperties({ objectId, pageId, onClose }: ObjectPropertiesProps) 
       </div>
     </div>
   );
-}
-
-function handleChange(field: string, value: any) {
-  // This would be handled by the parent component's state
 }

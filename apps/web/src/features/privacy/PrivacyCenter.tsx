@@ -157,120 +157,120 @@ export function PrivacyCenter({ id }: { id: string }) {
               ))}
             </div>
           )}
+        </section>
 
-          {/* Consent Requests Panel */}
-          <section role="tabpanel" className="tab-panel" aria-label="Consent requests">
-            {consentRequests.length === 0 ? (
-              <div className="empty-state">
-                <p>No pending consent requests</p>
-              </div>
-            ) : (
-              <div className="consent-list" role="list">
-                {consentRequests.map(request => (
-                  <div key={request.id} className="consent-card" role="listitem">
-                    <div className="consent-header">
-                      <span className="consent-time">{new Date(request.timestamp).toLocaleString()}</span>
-                      <span className={`consent-status ${request.status}`}>{request.status}</span>
-                    </div>
-                    <div className="consent-details">
-                      <div>Assets: {request.assetIds.join(', ')}</div>
-                      <div>Region: {request.regionDescription}</div>
-                      <div>Detected Text: {request.detectedText || '(none)'}</div>
-                      <div>Detected Faces: {request.detectedFaces}</div>
-                    </div>
-                    {request.status === 'pending' && (
-                      <div className="consent-actions">
-                        <button className="btn btn-primary btn-sm" onClick={() => handleConsent(request.id, true)}>
-                          Approve
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleConsent(request.id, false)}>
-                          Deny
-                        </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => {
-                          // Redact
-                        }}>
-                          Redact First
-                        </button>
-                      </div>
-                    )}
+        {/* Consent Requests Panel */}
+        <section role="tabpanel" className="tab-panel" aria-label="Consent requests">
+          {consentRequests.length === 0 ? (
+            <div className="empty-state">
+              <p>No pending consent requests</p>
+            </div>
+          ) : (
+            <div className="consent-list" role="list">
+              {consentRequests.map(request => (
+                <div key={request.id} className="consent-card" role="listitem">
+                  <div className="consent-header">
+                    <span className="consent-time">{new Date(request.timestamp).toLocaleString()}</span>
+                    <span className={`consent-status ${request.status}`}>{request.status}</span>
                   </div>
-                ))}
+                  <div className="consent-details">
+                    <div>Assets: {request.assetIds.join(', ')}</div>
+                    <div>Region: {request.regionDescription}</div>
+                    <div>Detected Text: {request.detectedText || '(none)'}</div>
+                    <div>Detected Faces: {request.detectedFaces}</div>
+                  </div>
+                  {request.status === 'pending' && (
+                    <div className="consent-actions">
+                      <button className="btn btn-primary btn-sm" onClick={() => handleConsent(request.id, true)}>
+                        Approve
+                      </button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleConsent(request.id, false)}>
+                        Deny
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => {
+                        // Redact
+                      }}>
+                        Redact First
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Redaction Panel */}
+        <section role="tabpanel" className="tab-panel" aria-label="Redaction">
+          <h3>Redact Sensitive Content</h3>
+          <p>Select assets to redact sensitive information before processing</p>
+          <div className="redaction-tools">
+            <label>
+              <input type="checkbox" checked={redactionMode} onChange={e => setRedactionMode(e.target.checked)} />
+              Enable Redaction Mode
+            </label>
+            {redactionMode && (
+              <div className="redaction-options">
+                <label>
+                  <input type="checkbox" /> Redact detected faces
+                </label>
+                <label>
+                  <input type="checkbox" /> Redact detected text
+                </label>
+                <label>
+                  <input type="checkbox" /> Redact license plates
+                </label>
+                <label>
+                  <input type="checkbox" /> Redact personal identifiers
+                </label>
               </div>
             )}
-
-            {/* Redaction Panel */}
-            <section role="tabpanel" className="tab-panel" aria-label="Redaction">
-              <h3>Redact Sensitive Content</h3>
-              <p>Select assets to redact sensitive information before processing</p>
-              <div className="redaction-tools">
-                <label>
-                  <input type="checkbox" checked={redactionMode} onChange={e => setRedactionMode(e.target.checked)} />
-                  Enable Redaction Mode
-                </label>
-                {redactionMode && (
-                  <div className="redaction-options">
-                    <label>
-                      <input type="checkbox" /> Redact detected faces
-                    </label>
-                    <label>
-                      <input type="checkbox" /> Redact detected text
-                    </label>
-                    <label>
-                      <input type="checkbox" /> Redact license plates
-                    </label>
-                    <label>
-                      <input type="checkbox" /> Redact personal identifiers
-                    </label>
-                  </div>
-                )}
+          </div>
+          <div className="asset-list" role="list">
+            {project && Object.entries(project.assets).map(([id, asset]) => (
+              <div key={id} className="asset-item" role="listitem">
+                <span>{asset.fileName}</span>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleRedact(id)}>
+                  Redact
+                </button>
               </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Deletion Panel */}
+        <section role="tabpanel" className="tab-panel" aria-label="Deletion">
+          <h3>Delete Project Data</h3>
+          <div className="deletion-options">
+            <div className="deletion-card">
+              <h4>Delete Individual Assets</h4>
+              <p>Select assets to permanently remove</p>
               <div className="asset-list" role="list">
                 {project && Object.entries(project.assets).map(([id, asset]) => (
                   <div key={id} className="asset-item" role="listitem">
-                    <span>{asset.fileName}</span>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleRedact(id)}>
-                      Redact
+                    <span>{asset.fileName} ({asset.mimeType})</span>
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(id)}>
+                      Delete
                     </button>
                   </div>
                 ))}
               </div>
-            </section>
+            </div>
 
-            {/* Deletion Panel */}
-            <section role="tabpanel" className="tab-panel" aria-label="Deletion">
-              <h3>Delete Project Data</h3>
-              <div className="deletion-options">
-                <div className="deletion-card">
-                  <h4>Delete Individual Assets</h4>
-                  <p>Select assets to permanently remove</p>
-                  <div className="asset-list" role="list">
-                    {project && Object.entries(project.assets).map(([id, asset]) => (
-                      <div key={id} className="asset-item" role="listitem">
-                        <span>{asset.fileName} ({asset.mimeType})</span>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(id)}>
-                          Delete
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="deletion-card warning">
-                  <h4>Delete Entire Project</h4>
-                  <p>This will permanently delete all project data including assets, decisions, and history.</p>
-                  <button className="btn btn-danger" onClick={() => {
-                    if (confirm('Are you sure you want to delete the entire project? This cannot be undone.')) {
-                      // Delete project
-                    }
-                  }}>
-                    Delete Project
-                  </button>
-                </div>
-              </div>
-            </section>
+            <div className="deletion-card warning">
+              <h4>Delete Entire Project</h4>
+              <p>This will permanently delete all project data including assets, decisions, and history.</p>
+              <button className="btn btn-danger" onClick={() => {
+                if (confirm('Are you sure you want to delete the entire project? This cannot be undone.')) {
+                  // Delete project
+                }
+              }}>
+                Delete Project
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </section>
   );
 }

@@ -1,14 +1,19 @@
+// ============================================================================
+// Domain Events
+// ============================================================================
+
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
+import type { JsonValue } from 'type-fest';
 
 // Re-export all schema types
 export * from '../schema';
 
 // ============================================================================
-// Event Envelope
+// Base Event Types
 // ============================================================================
 
-export const EventEnvelopeSchema = z.object({
+export const EventBaseSchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
   projectId: z.string().min(1),
@@ -16,524 +21,430 @@ export const EventEnvelopeSchema = z.object({
   timestamp: z.string().datetime({ offset: true }),
   actorId: z.string().min(1),
   payload: z.unknown(),
-  hmac: z.string().length(64).optional(), // HMAC-SHA256 of the event
+  hmac: z.string().length(64).optional(),
 });
-export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;
+export type EventBase = z.infer<typeof EventBaseSchema>;
 
 // ============================================================================
-// Event Types (discriminated union by type)
+// Payload Schemas (discriminated union by type)
 // ============================================================================
 
 // Project Events
-export const ProjectCreatedEventSchema = z.object({
-  type: z.literal('ProjectCreated'),
-  payload: z.object({
-    project: z.object({
-      id: z.string(),
-      title: z.string(),
-      language: z.string(),
-      documentType: z.string(),
-      intentContract: z.unknown(),
-      theme: z.unknown(),
-      actorId: z.string(),
-    }),
+export const ProjectCreatedPayloadSchema = z.object({
+  project: z.object({
+    id: z.string(),
+    title: z.string(),
+    language: z.string(),
+    documentType: z.string(),
+    intentContract: z.unknown(),
+    theme: z.unknown(),
+    actorId: z.string(),
   }),
 });
 
-export const ProjectUpdatedEventSchema = z.object({
-  type: z.literal('ProjectUpdated'),
-  payload: z.object({
-    changes: z.record(z.unknown()),
-  }),
+export const ProjectUpdatedPayloadSchema = z.object({
+  changes: z.record(z.unknown()),
 });
 
-export const ProjectDeletedEventSchema = z.object({
-  type: z.literal('ProjectDeleted'),
-  payload: z.object({}),
+export const ProjectDeletedPayloadSchema = z.object({});
+
+export const ProjectEncryptedPayloadSchema = z.object({
+  keyHash: z.string().length(64),
 });
 
-export const ProjectEncryptedEventSchema = z.object({
-  type: z.literal('ProjectEncrypted'),
-  payload: z.object({
-    keyHash: z.string().length(64),
-  }),
-});
-
-export const ProjectImportedEventSchema = z.object({
-  type: z.literal('ProjectImported'),
-  payload: z.object({
-    sourceHash: z.string().length(64),
-  }),
+export const ProjectImportedPayloadSchema = z.object({
+  sourceHash: z.string().length(64),
 });
 
 // Page Events
-export const PageCreatedEventSchema = z.object({
-  type: z.literal('PageCreated'),
-  payload: z.object({
-    pageId: z.string(),
-    template: z.string(),
-    insertAfter: z.string().optional(),
-  }),
+export const PageCreatedPayloadSchema = z.object({
+  pageId: z.string(),
+  template: z.string(),
+  insertAfter: z.string().optional(),
 });
 
-export const PageUpdatedEventSchema = z.object({
-  type: z.literal('PageUpdated'),
-  payload: z.object({
-    pageId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const PageUpdatedPayloadSchema = z.object({
+  pageId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const PageDeletedEventSchema = z.object({
-  type: z.literal('PageDeleted'),
-  payload: z.object({
-    pageId: z.string(),
-  }),
+export const PageDeletedPayloadSchema = z.object({
+  pageId: z.string(),
 });
 
-export const PageReorderedEventSchema = z.object({
-  type: z.literal('PageReordered'),
-  payload: z.object({
-    pageOrder: z.array(z.string()),
-  }),
+export const PageReorderedPayloadSchema = z.object({
+  pageOrder: z.array(z.string()),
 });
 
-export const PageStatusChangedEventSchema = z.object({
-  type: z.literal('PageStatusChanged'),
-  payload: z.object({
-    pageId: z.string(),
-    oldStatus: z.string(),
-    newStatus: z.string(),
-  }),
+export const PageStatusChangedPayloadSchema = z.object({
+  pageId: z.string(),
+  oldStatus: z.string(),
+  newStatus: z.string(),
 });
 
 // Object Events
-export const ObjectCreatedEventSchema = z.object({
-  type: z.literal('ObjectCreated'),
-  payload: z.object({
-    object: z.unknown(), // DocumentObject
-  }),
+export const ObjectCreatedPayloadSchema = z.object({
+  object: z.unknown(),
 });
 
-export const ObjectUpdatedEventSchema = z.object({
-  type: z.literal('ObjectUpdated'),
-  payload: z.object({
-    objectId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const ObjectUpdatedPayloadSchema = z.object({
+  objectId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const ObjectDeletedEventSchema = z.object({
-  type: z.literal('ObjectDeleted'),
-  payload: z.object({
-    objectId: z.string(),
-    pageId: z.string(),
-  }),
+export const ObjectDeletedPayloadSchema = z.object({
+  objectId: z.string(),
+  pageId: z.string(),
 });
 
-export const ObjectMovedEventSchema = z.object({
-  type: z.literal('ObjectMoved'),
-  payload: z.object({
-    objectId: z.string(),
-    fromPageId: z.string(),
-    toPageId: z.string(),
-    insertAfter: z.string().optional(),
-  }),
+export const ObjectMovedPayloadSchema = z.object({
+  objectId: z.string(),
+  fromPageId: z.string(),
+  toPageId: z.string(),
+  insertAfter: z.string().optional(),
 });
 
-export const ObjectReadingOrderChangedEventSchema = z.object({
-  type: z.literal('ObjectReadingOrderChanged'),
-  payload: z.object({
-    pageId: z.string(),
-    readingOrder: z.array(z.string()),
-  }),
+export const ObjectReadingOrderChangedPayloadSchema = z.object({
+  pageId: z.string(),
+  readingOrder: z.array(z.string()),
 });
 
-export const ObjectApprovalChangedEventSchema = z.object({
-  type: z.literal('ObjectApprovalChanged'),
-  payload: z.object({
-    objectId: z.string(),
-    oldStatus: z.string(),
-    newStatus: z.string(),
-    actorId: z.string(),
-    decisionId: z.string().optional(),
-  }),
+export const ObjectApprovalChangedPayloadSchema = z.object({
+  objectId: z.string(),
+  oldStatus: z.string(),
+  newStatus: z.string(),
+  actorId: z.string(),
+  decisionId: z.string().optional(),
 });
 
 // Asset Events
-export const AssetUploadedEventSchema = z.object({
-  type: z.literal('AssetUploaded'),
-  payload: z.object({
-    asset: z.unknown(), // ImageAsset
-  }),
+export const AssetUploadedPayloadSchema = z.object({
+  asset: z.unknown(),
 });
 
-export const AssetUpdatedEventSchema = z.object({
-  type: z.literal('AssetUpdated'),
-  payload: z.object({
-    assetId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const AssetUpdatedPayloadSchema = z.object({
+  assetId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const AssetDeletedEventSchema = z.object({
-  type: z.literal('AssetDeleted'),
-  payload: z.object({
-    assetId: z.string(),
-  }),
+export const AssetDeletedPayloadSchema = z.object({
+  assetId: z.string(),
 });
 
-export const AssetCropRegisteredEventSchema = z.object({
-  type: z.literal('AssetCropRegistered'),
-  payload: z.object({
-    assetId: z.string(),
-    crop: z.unknown(), // CropSpec
-  }),
+export const AssetCropRegisteredPayloadSchema = z.object({
+  assetId: z.string(),
+  crop: z.unknown(),
 });
 
-export const AssetAnalysisRecordedEventSchema = z.object({
-  type: z.literal('AssetAnalysisRecorded'),
-  payload: z.object({
-    assetId: z.string(),
-    observations: z.array(z.unknown()),
-    interpretations: z.array(z.unknown()),
-    uncertainties: z.array(z.unknown()),
-  }),
+export const AssetAnalysisRecordedPayloadSchema = z.object({
+  assetId: z.string(),
+  observations: z.array(z.unknown()),
+  interpretations: z.array(z.unknown()),
+  uncertainties: z.array(z.unknown()),
 });
 
 // Dataset Events
-export const DatasetCreatedEventSchema = z.object({
-  type: z.literal('DatasetCreated'),
-  payload: z.object({
-    dataset: z.unknown(), // Dataset
-  }),
+export const DatasetCreatedPayloadSchema = z.object({
+  dataset: z.unknown(),
 });
 
-export const DatasetUpdatedEventSchema = z.object({
-  type: z.literal('DatasetUpdated'),
-  payload: z.object({
-    datasetId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const DatasetUpdatedPayloadSchema = z.object({
+  datasetId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const DatasetDeletedEventSchema = z.object({
-  type: z.literal('DatasetDeleted'),
-  payload: z.object({
-    datasetId: z.string(),
-  }),
+export const DatasetDeletedPayloadSchema = z.object({
+  datasetId: z.string(),
 });
 
-export const DatasetSchemaConfirmedEventSchema = z.object({
-  type: z.literal('DatasetSchemaConfirmed'),
-  payload: z.object({
-    datasetId: z.string(),
-  }),
+export const DatasetSchemaConfirmedPayloadSchema = z.object({
+  datasetId: z.string(),
 });
 
 // Diagram Events
-export const DiagramCreatedEventSchema = z.object({
-  type: z.literal('DiagramCreated'),
-  payload: z.object({
-    diagram: z.unknown(), // Diagram
-  }),
+export const DiagramCreatedPayloadSchema = z.object({
+  diagram: z.unknown(),
 });
 
-export const DiagramUpdatedEventSchema = z.object({
-  type: z.literal('DiagramUpdated'),
-  payload: z.object({
-    diagramId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const DiagramUpdatedPayloadSchema = z.object({
+  diagramId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const DiagramDeletedEventSchema = z.object({
-  type: z.literal('DiagramDeleted'),
-  payload: z.object({
-    diagramId: z.string(),
-  }),
+export const DiagramDeletedPayloadSchema = z.object({
+  diagramId: z.string(),
 });
 
-export const DiagramNodeAddedEventSchema = z.object({
-  type: z.literal('DiagramNodeAdded'),
-  payload: z.object({
-    diagramId: z.string(),
-    node: z.unknown(), // DiagramNode
-  }),
+export const DiagramNodeAddedPayloadSchema = z.object({
+  diagramId: z.string(),
+  node: z.unknown(),
 });
 
-export const DiagramNodeUpdatedEventSchema = z.object({
-  type: z.literal('DiagramNodeUpdated'),
-  payload: z.object({
-    diagramId: z.string(),
-    nodeId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const DiagramNodeUpdatedPayloadSchema = z.object({
+  diagramId: z.string(),
+  nodeId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const DiagramNodeRemovedEventSchema = z.object({
-  type: z.literal('DiagramNodeRemoved'),
-  payload: z.object({
-    diagramId: z.string(),
-    nodeId: z.string(),
-  }),
+export const DiagramNodeRemovedPayloadSchema = z.object({
+  diagramId: z.string(),
+  nodeId: z.string(),
 });
 
-export const DiagramEdgeAddedEventSchema = z.object({
-  type: z.literal('DiagramEdgeAdded'),
-  payload: z.object({
-    diagramId: z.string(),
-    edge: z.unknown(), // DiagramEdge
-  }),
+export const DiagramEdgeAddedPayloadSchema = z.object({
+  diagramId: z.string(),
+  edge: z.unknown(),
 });
 
-export const DiagramEdgeUpdatedEventSchema = z.object({
-  type: z.literal('DiagramEdgeUpdated'),
-  payload: z.object({
-    diagramId: z.string(),
-    edgeId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const DiagramEdgeUpdatedPayloadSchema = z.object({
+  diagramId: z.string(),
+  edgeId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const DiagramEdgeRemovedEventSchema = z.object({
-  type: z.literal('DiagramEdgeRemoved'),
-  payload: z.object({
-    diagramId: z.string(),
-    edgeId: z.string(),
-  }),
+export const DiagramEdgeRemovedPayloadSchema = z.object({
+  diagramId: z.string(),
+  edgeId: z.string(),
 });
 
-export const DiagramLayoutAppliedEventSchema = z.object({
-  type: z.literal('DiagramLayoutApplied'),
-  payload: z.object({
-    diagramId: z.string(),
-    layout: z.string(),
-    seed: z.number(),
-  }),
+export const DiagramLayoutAppliedPayloadSchema = z.object({
+  diagramId: z.string(),
+  layout: z.string(),
+  seed: z.number(),
 });
 
 // Chart Events
-export const ChartCreatedEventSchema = z.object({
-  type: z.literal('ChartCreated'),
-  payload: z.object({
-    chart: z.unknown(), // Chart
-  }),
+export const ChartCreatedPayloadSchema = z.object({
+  chart: z.unknown(),
 });
 
-export const ChartUpdatedEventSchema = z.object({
-  type: z.literal('ChartUpdated'),
-  payload: z.object({
-    chartId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const ChartUpdatedPayloadSchema = z.object({
+  chartId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const ChartDeletedEventSchema = z.object({
-  type: z.literal('ChartDeleted'),
-  payload: z.object({
-    chartId: z.string(),
-  }),
+export const ChartDeletedPayloadSchema = z.object({
+  chartId: z.string(),
 });
 
-export const ChartSpecVersionBumpedEventSchema = z.object({
-  type: z.literal('ChartSpecVersionBumped'),
-  payload: z.object({
-    chartId: z.string(),
-    oldVersion: z.number(),
-    newVersion: z.number(),
-  }),
+export const ChartSpecVersionBumpedPayloadSchema = z.object({
+  chartId: z.string(),
+  oldVersion: z.number(),
+  newVersion: z.number(),
 });
 
 // Decision Events
-export const DecisionCreatedEventSchema = z.object({
-  type: z.literal('DecisionCreated'),
-  payload: z.object({
-    decision: z.unknown(), // VisualDecision
-  }),
+export const DecisionCreatedPayloadSchema = z.object({
+  decision: z.unknown(),
 });
 
-export const DecisionUpdatedEventSchema = z.object({
-  type: z.literal('DecisionUpdated'),
-  payload: z.object({
-    decisionId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const DecisionUpdatedPayloadSchema = z.object({
+  decisionId: z.string(),
+  changes: z.record(z.unknown()),
 });
 
-export const DecisionApprovedEventSchema = z.object({
-  type: z.literal('DecisionApproved'),
-  payload: z.object({
-    decisionId: z.string(),
-    selectedOptionId: z.string(),
-    reason: z.string().optional(),
-    actorId: z.string(),
-  }),
+export const DecisionApprovedPayloadSchema = z.object({
+  decisionId: z.string(),
+  selectedOptionId: z.string(),
+  reason: z.string().optional(),
+  actorId: z.string(),
 });
 
-export const DecisionRejectedEventSchema = z.object({
-  type: z.literal('DecisionRejected'),
-  payload: z.object({
-    decisionId: z.string(),
-    reason: z.string(),
-    actorId: z.string(),
-  }),
+export const DecisionRejectedPayloadSchema = z.object({
+  decisionId: z.string(),
+  reason: z.string(),
+  actorId: z.string(),
 });
 
-export const DecisionStaledEventSchema = z.object({
-  type: z.literal('DecisionStaled'),
-  payload: z.object({
-    decisionId: z.string(),
-    reason: z.string(),
-  }),
+export const DecisionStaledPayloadSchema = z.object({
+  decisionId: z.string(),
+  reason: z.string(),
 });
 
 // Finding Events
-export const FindingCreatedEventSchema = z.object({
-  type: z.literal('FindingCreated'),
-  payload: z.object({
-    finding: z.unknown(), // ValidationFinding
-  }),
+export const FindingCreatedPayloadSchema = z.object({
+  finding: z.unknown(),
 });
 
-export const FindingResolvedEventSchema = z.object({
-  type: z.literal('FindingResolved'),
-  payload: z.object({
-    findingId: z.string(),
-  }),
+export const FindingResolvedPayloadSchema = z.object({
+  findingId: z.string(),
 });
 
-export const FindingAcceptedEventSchema = z.object({
-  type: z.literal('FindingAccepted'),
-  payload: z.object({
-    findingId: z.string(),
-    reason: z.string(),
-  }),
+export const FindingAcceptedPayloadSchema = z.object({
+  findingId: z.string(),
+  reason: z.string(),
 });
 
-export const FindingDismissedEventSchema = z.object({
-  type: z.literal('FindingDismissed'),
-  payload: z.object({
-    findingId: z.string(),
-  }),
+export const FindingDismissedPayloadSchema = z.object({
+  findingId: z.string(),
 });
 
-export const FindingReopenedEventSchema = z.object({
-  type: z.literal('FindingReopened'),
-  payload: z.object({
-    findingId: z.string(),
-    reason: z.string(),
-  }),
+export const FindingReopenedPayloadSchema = z.object({
+  findingId: z.string(),
+  reason: z.string(),
 });
 
 // Document Lifecycle Events
-export const ReviewRequestedEventSchema = z.object({
-  type: z.literal('ReviewRequested'),
-  payload: z.object({}),
+export const ReviewRequestedPayloadSchema = z.object({});
+export const AllPagesApprovedPayloadSchema = z.object({});
+export const ReadinessConfirmedPayloadSchema = z.object({});
+export const DocumentLockedPayloadSchema = z.object({
+  manifestHash: z.string().length(64),
 });
-
-export const AllPagesApprovedEventSchema = z.object({
-  type: z.literal('AllPagesApproved'),
-  payload: z.object({}),
-});
-
-export const ReadinessConfirmedEventSchema = z.object({
-  type: z.literal('ReadinessConfirmed'),
-  payload: z.object({}),
-});
-
-export const DocumentLockedEventSchema = z.object({
-  type: z.literal('DocumentLocked'),
-  payload: z.object({
-    manifestHash: z.string().length(64),
-  }),
-});
-
-export const DocumentUnlockedEventSchema = z.object({
-  type: z.literal('DocumentUnlocked'),
-  payload: z.object({}),
-});
-
-export const ExportFinalizedEventSchema = z.object({
-  type: z.literal('ExportFinalized'),
-  payload: z.object({
-    exportJobId: z.string(),
-    manifestHash: z.string().length(64),
-  }),
+export const DocumentUnlockedPayloadSchema = z.object({});
+export const ExportFinalizedPayloadSchema = z.object({
+  exportJobId: z.string(),
+  manifestHash: z.string().length(64),
 });
 
 // Export Events
-export const ExportJobCreatedEventSchema = z.object({
-  type: z.literal('ExportJobCreated'),
-  payload: z.object({
-    exportJob: z.unknown(), // ExportJob
-  }),
+export const ExportJobCreatedPayloadSchema = z.object({
+  exportJob: z.unknown(),
 });
-
-export const ExportJobUpdatedEventSchema = z.object({
-  type: z.literal('ExportJobUpdated'),
-  payload: z.object({
-    exportJobId: z.string(),
-    changes: z.record(z.unknown()),
-  }),
+export const ExportJobUpdatedPayloadSchema = z.object({
+  exportJobId: z.string(),
+  changes: z.record(z.unknown()),
 });
-
-export const ExportManifestApprovedEventSchema = z.object({
-  type: z.literal('ExportManifestApproved'),
-  payload: z.object({
-    exportJobId: z.string(),
-    actorId: z.string(),
-    approvalToken: z.string(),
-  }),
+export const ExportManifestApprovedPayloadSchema = z.object({
+  exportJobId: z.string(),
+  actorId: z.string(),
+  approvalToken: z.string(),
 });
 
 // Version/Snapshot Events
-export const SnapshotCreatedEventSchema = z.object({
-  type: z.literal('SnapshotCreated'),
-  payload: z.object({
-    version: z.number().int().nonnegative(),
-    snapshotHash: z.string().length(64),
-    eventCount: z.number().int().nonnegative(),
-  }),
+export const SnapshotCreatedPayloadSchema = z.object({
+  version: z.number().int().nonnegative(),
+  snapshotHash: z.string().length(64),
+  eventCount: z.number().int().nonnegative(),
 });
-
-export const UndoPerformedEventSchema = z.object({
-  type: z.literal('UndoPerformed'),
-  payload: z.object({
-    undoneEventIds: z.array(z.string()),
-    newVersion: z.number().int().nonnegative(),
-  }),
+export const UndoPerformedPayloadSchema = z.object({
+  undoneEventIds: z.array(z.string()),
+  newVersion: z.number().int().nonnegative(),
 });
 
 // Privacy Events
-export const PrivacyReceiptCreatedEventSchema = z.object({
-  type: z.literal('PrivacyReceiptCreated'),
-  payload: z.object({
-    receiptId: z.string(),
-    processingType: z.enum(['local', 'remote']),
-    assetIds: z.array(z.string()).optional(),
-    regionDescription: z.string().optional(),
-    consentGiven: z.boolean(),
-    retentionStatus: z.enum(['retained', 'deleted', 'pending']),
-  }),
+export const PrivacyReceiptCreatedPayloadSchema = z.object({
+  receiptId: z.string(),
+  processingType: z.enum(['local', 'remote']),
+  assetIds: z.array(z.string()).optional(),
+  regionDescription: z.string().optional(),
+  consentGiven: z.boolean(),
+  retentionStatus: z.enum(['retained', 'deleted', 'pending']),
 });
 
 // Agent Activity Events
-export const AgentToolExecutedEventSchema = z.object({
-  type: z.literal('AgentToolExecuted'),
-  payload: z.object({
-    toolName: z.string(),
-    input: z.unknown(),
-    result: z.unknown(),
-    status: z.enum(['success', 'error']),
-    versionBefore: z.number().int().nonnegative(),
-    versionAfter: z.number().int().nonnegative(),
-    durationMs: z.number().int().nonnegative(),
-  }),
+export const AgentToolExecutedPayloadSchema = z.object({
+  toolName: z.string(),
+  input: z.unknown(),
+  result: z.unknown(),
+  status: z.enum(['success', 'error']),
+  versionBefore: z.number().int().nonnegative(),
+  versionAfter: z.number().int().nonnegative(),
+  durationMs: z.number().int().nonnegative(),
 });
 
 // ============================================================================
-// Union Type
+// Full Event Schemas (Base + Payload)
+// ============================================================================
+
+const createEventSchema = <T extends z.ZodTypeAny>(type: string, payloadSchema: T) =>
+  EventBaseSchema.extend({
+    type: z.literal(type),
+    payload: payloadSchema,
+  });
+
+// Project
+export const ProjectCreatedEventSchema = createEventSchema('ProjectCreated', ProjectCreatedPayloadSchema);
+export const ProjectUpdatedEventSchema = createEventSchema('ProjectUpdated', ProjectUpdatedPayloadSchema);
+export const ProjectDeletedEventSchema = createEventSchema('ProjectDeleted', ProjectDeletedPayloadSchema);
+export const ProjectEncryptedEventSchema = createEventSchema('ProjectEncrypted', ProjectEncryptedPayloadSchema);
+export const ProjectImportedEventSchema = createEventSchema('ProjectImported', ProjectImportedPayloadSchema);
+
+// Page
+export const PageCreatedEventSchema = createEventSchema('PageCreated', PageCreatedPayloadSchema);
+export const PageUpdatedEventSchema = createEventSchema('PageUpdated', PageUpdatedPayloadSchema);
+export const PageDeletedEventSchema = createEventSchema('PageDeleted', PageDeletedPayloadSchema);
+export const PageReorderedEventSchema = createEventSchema('PageReordered', PageReorderedPayloadSchema);
+export const PageStatusChangedEventSchema = createEventSchema('PageStatusChanged', PageStatusChangedPayloadSchema);
+
+// Object
+export const ObjectCreatedEventSchema = createEventSchema('ObjectCreated', ObjectCreatedPayloadSchema);
+export const ObjectUpdatedEventSchema = createEventSchema('ObjectUpdated', ObjectUpdatedPayloadSchema);
+export const ObjectDeletedEventSchema = createEventSchema('ObjectDeleted', ObjectDeletedPayloadSchema);
+export const ObjectMovedEventSchema = createEventSchema('ObjectMoved', ObjectMovedPayloadSchema);
+export const ObjectReadingOrderChangedEventSchema = createEventSchema('ObjectReadingOrderChanged', ObjectReadingOrderChangedPayloadSchema);
+export const ObjectApprovalChangedEventSchema = createEventSchema('ObjectApprovalChanged', ObjectApprovalChangedPayloadSchema);
+
+// Asset
+export const AssetUploadedEventSchema = createEventSchema('AssetUploaded', AssetUploadedPayloadSchema);
+export const AssetUpdatedEventSchema = createEventSchema('AssetUpdated', AssetUpdatedPayloadSchema);
+export const AssetDeletedEventSchema = createEventSchema('AssetDeleted', AssetDeletedPayloadSchema);
+export const AssetCropRegisteredEventSchema = createEventSchema('AssetCropRegistered', AssetCropRegisteredPayloadSchema);
+export const AssetAnalysisRecordedEventSchema = createEventSchema('AssetAnalysisRecorded', AssetAnalysisRecordedPayloadSchema);
+
+// Dataset
+export const DatasetCreatedEventSchema = createEventSchema('DatasetCreated', DatasetCreatedPayloadSchema);
+export const DatasetUpdatedEventSchema = createEventSchema('DatasetUpdated', DatasetUpdatedPayloadSchema);
+export const DatasetDeletedEventSchema = createEventSchema('DatasetDeleted', DatasetDeletedPayloadSchema);
+export const DatasetSchemaConfirmedEventSchema = createEventSchema('DatasetSchemaConfirmed', DatasetSchemaConfirmedPayloadSchema);
+
+// Diagram
+export const DiagramCreatedEventSchema = createEventSchema('DiagramCreated', DiagramCreatedPayloadSchema);
+export const DiagramUpdatedEventSchema = createEventSchema('DiagramUpdated', DiagramUpdatedPayloadSchema);
+export const DiagramDeletedEventSchema = createEventSchema('DiagramDeleted', DiagramDeletedPayloadSchema);
+export const DiagramNodeAddedEventSchema = createEventSchema('DiagramNodeAdded', DiagramNodeAddedPayloadSchema);
+export const DiagramNodeUpdatedEventSchema = createEventSchema('DiagramNodeUpdated', DiagramNodeUpdatedPayloadSchema);
+export const DiagramNodeRemovedEventSchema = createEventSchema('DiagramNodeRemoved', DiagramNodeRemovedPayloadSchema);
+export const DiagramEdgeAddedEventSchema = createEventSchema('DiagramEdgeAdded', DiagramEdgeAddedPayloadSchema);
+export const DiagramEdgeUpdatedEventSchema = createEventSchema('DiagramEdgeUpdated', DiagramEdgeUpdatedPayloadSchema);
+export const DiagramEdgeRemovedEventSchema = createEventSchema('DiagramEdgeRemoved', DiagramEdgeRemovedPayloadSchema);
+export const DiagramLayoutAppliedEventSchema = createEventSchema('DiagramLayoutApplied', DiagramLayoutAppliedPayloadSchema);
+
+// Chart
+export const ChartCreatedEventSchema = createEventSchema('ChartCreated', ChartCreatedPayloadSchema);
+export const ChartUpdatedEventSchema = createEventSchema('ChartUpdated', ChartUpdatedPayloadSchema);
+export const ChartDeletedEventSchema = createEventSchema('ChartDeleted', ChartDeletedPayloadSchema);
+export const ChartSpecVersionBumpedEventSchema = createEventSchema('ChartSpecVersionBumped', ChartSpecVersionBumpedPayloadSchema);
+
+// Decision
+export const DecisionCreatedEventSchema = createEventSchema('DecisionCreated', DecisionCreatedPayloadSchema);
+export const DecisionUpdatedEventSchema = createEventSchema('DecisionUpdated', DecisionUpdatedPayloadSchema);
+export const DecisionApprovedEventSchema = createEventSchema('DecisionApproved', DecisionApprovedPayloadSchema);
+export const DecisionRejectedEventSchema = createEventSchema('DecisionRejected', DecisionRejectedPayloadSchema);
+export const DecisionStaledEventSchema = createEventSchema('DecisionStaled', DecisionStaledPayloadSchema);
+
+// Finding
+export const FindingCreatedEventSchema = createEventSchema('FindingCreated', FindingCreatedPayloadSchema);
+export const FindingResolvedEventSchema = createEventSchema('FindingResolved', FindingResolvedPayloadSchema);
+export const FindingAcceptedEventSchema = createEventSchema('FindingAccepted', FindingAcceptedPayloadSchema);
+export const FindingDismissedEventSchema = createEventSchema('FindingDismissed', FindingDismissedPayloadSchema);
+export const FindingReopenedEventSchema = createEventSchema('FindingReopened', FindingReopenedPayloadSchema);
+
+// Document Lifecycle
+export const ReviewRequestedEventSchema = createEventSchema('ReviewRequested', ReviewRequestedPayloadSchema);
+export const AllPagesApprovedEventSchema = createEventSchema('AllPagesApproved', AllPagesApprovedPayloadSchema);
+export const ReadinessConfirmedEventSchema = createEventSchema('ReadinessConfirmed', ReadinessConfirmedPayloadSchema);
+export const DocumentLockedEventSchema = createEventSchema('DocumentLocked', DocumentLockedPayloadSchema);
+export const DocumentUnlockedEventSchema = createEventSchema('DocumentUnlocked', DocumentUnlockedPayloadSchema);
+export const ExportFinalizedEventSchema = createEventSchema('ExportFinalized', ExportFinalizedPayloadSchema);
+
+// Export
+export const ExportJobCreatedEventSchema = createEventSchema('ExportJobCreated', ExportJobCreatedPayloadSchema);
+export const ExportJobUpdatedEventSchema = createEventSchema('ExportJobUpdated', ExportJobUpdatedPayloadSchema);
+export const ExportManifestApprovedEventSchema = createEventSchema('ExportManifestApproved', ExportManifestApprovedPayloadSchema);
+
+// Version/Snapshot
+export const SnapshotCreatedEventSchema = createEventSchema('SnapshotCreated', SnapshotCreatedPayloadSchema);
+export const UndoPerformedEventSchema = createEventSchema('UndoPerformed', UndoPerformedPayloadSchema);
+
+// Privacy
+export const PrivacyReceiptCreatedEventSchema = createEventSchema('PrivacyReceiptCreated', PrivacyReceiptCreatedPayloadSchema);
+
+// Agent Activity
+export const AgentToolExecutedEventSchema = createEventSchema('AgentToolExecuted', AgentToolExecutedPayloadSchema);
+
+// ============================================================================
+// Union Types
 // ============================================================================
 
 export const DomainEventSchema = z.discriminatedUnion('type', [
@@ -603,32 +514,48 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
 
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 
+// Alias for storage
+export type EventEnvelope = EventBase & { payload: JsonValue };
+
 // ============================================================================
-// Event Factory Functions
+// Event Factory Function
 // ============================================================================
 
-const createEvent = <T extends DomainEvent['type']>(
+export function createEvent<T extends DomainEvent['type']>(
   type: T,
   projectId: string,
   version: number,
   actorId: string,
-  payload: z.infer<typeof DomainEventSchema> extends { type: T; payload: infer P } ? P : never,
-  hmac?: string
-): DomainEvent => ({
-  id: `evt_${nanoid(16)}`,
-  type,
-  projectId,
-  version,
-  timestamp: new Date().toISOString(),
-  actorId,
-  payload,
-  hmac,
-});
+  payload: z.infer<typeof DomainEventSchema> extends { type: T; payload: infer P } ? P : never
+): DomainEvent {
+  return {
+    id: `evt_${nanoid(16)}`,
+    type,
+    projectId,
+    version,
+    timestamp: new Date().toISOString(),
+    actorId,
+    payload,
+    hmac: undefined,
+  } as DomainEvent;
+}
+
+// ============================================================================
+// Event Factory Functions (Typed)
+// ============================================================================
 
 export const createProjectCreatedEvent = (
   projectId: string,
   actorId: string,
-  project: DocumentProject
+  project: {
+    id: string;
+    title: string;
+    language: string;
+    documentType: string;
+    intentContract: unknown;
+    theme: unknown;
+    actorId: string;
+  }
 ) => createEvent('ProjectCreated', projectId, 1, actorId, { project });
 
 export const createPageCreatedEvent = (
@@ -644,7 +571,7 @@ export const createObjectCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  object: DocumentObject
+  object: z.infer<typeof import('../schema').DocumentObjectSchema>
 ) => createEvent('ObjectCreated', projectId, version, actorId, { object });
 
 export const createObjectUpdatedEvent = (
@@ -667,14 +594,14 @@ export const createAssetUploadedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  asset: ImageAsset
+  asset: z.infer<typeof import('../schema').ImageAssetSchema>
 ) => createEvent('AssetUploaded', projectId, version, actorId, { asset });
 
 export const createDecisionCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  decision: VisualDecision
+  decision: z.infer<typeof import('../schema').VisualDecisionSchema>
 ) => createEvent('DecisionCreated', projectId, version, actorId, { decision });
 
 export const createDecisionApprovedEvent = (
@@ -690,7 +617,7 @@ export const createFindingCreatedEvent = (
   projectId: string,
   version: number,
   actorId: string,
-  finding: ValidationFinding
+  finding: z.infer<typeof import('../schema').ValidationFindingSchema>
 ) => createEvent('FindingCreated', projectId, version, actorId, { finding });
 
 export const createAgentToolExecutedEvent = (
@@ -713,12 +640,3 @@ export const createAgentToolExecutedEvent = (
   versionAfter,
   durationMs,
 });
-
-// Import types for factory functions
-import type {
-  DocumentProject,
-  DocumentObject,
-  ImageAsset,
-  VisualDecision,
-  ValidationFinding,
-} from '../schema';

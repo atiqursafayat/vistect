@@ -2,20 +2,20 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*", "vite.config.ts", "vitest.config.ts"],
   "references": [
-    { "path": "../packages/domain" },
-    { "path": "../packages/graph" },
-    { "path": "../packages/charting" },
-    { "path": "../packages/render-html" },
-    { "path": "../packages/render-pdf" },
-    { "path": "../packages/webmcp" },
-    { "path": "../packages/storage" },
-    { "path": "../packages/testing" }
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/graph" },
+    { "path": "../../packages/charting" },
+    { "path": "../../packages/render-html" },
+    { "path": "../../packages/render-pdf" },
+    { "path": "../../packages/webmcp" },
+    { "path": "../../packages/storage" },
+    { "path": "../../packages/testing" }
   ]
 }

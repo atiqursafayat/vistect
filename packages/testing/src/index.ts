@@ -2,7 +2,8 @@
 // Testing Utilities
 // ============================================================================
 
-import type { DocumentProject, DocumentObject, Page, Actor, ActorKind } from '@vistect/domain/schema';
+import type { DocumentProject, DocumentObject, Page, Actor } from '@vistect/domain/schema';
+import { expect } from 'vitest';
 
 // ============================================================================
 // Mock Factories
@@ -54,6 +55,7 @@ export function createMockObject(overrides: Partial<DocumentObject> = {}): Docum
     accessibility: {
       isDecorative: false,
       includedInReadingOrder: true,
+      warnings: [],
     },
     provenance: {
       sourceType: 'user',
@@ -137,10 +139,10 @@ export function createMockModelContext(): MockModelContext {
     getTools() {
       return Array.from(tools.values()).map(({ tool }) => tool);
     },
-    async executeTool(name: string, input: string) {
+    async executeTool(name: string, _input: string) {
       const entry = tools.get(name);
       if (!entry) throw new Error(`Tool ${name} not found`);
-      return { content: [{ type: 'text', text: 'ok' }] };
+      return JSON.stringify({ content: [{ type: 'text', text: 'ok' }] });
     },
     ontoolchange: null,
   };

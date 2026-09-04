@@ -3,7 +3,7 @@
 // ============================================================================
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { useStore } from '../../state';
+import { useStore } from '../state';
 import { eventStore } from '@vistect/storage/eventStore';
 import { capabilityProbe } from '@vistect/webmcp/probe';
 import { activityRecorder } from '@vistect/webmcp/activity';

@@ -351,7 +351,7 @@ export function IntentEditor() {
                     type="checkbox"
                     checked={intent.exportRequirements.pdf}
                     onChange={e => handleNestedChange('exportRequirements', 'pdf', e.target.checked)}
-                  >
+                  />
                   PDF
                 </label>
                 <label>
@@ -359,7 +359,7 @@ export function IntentEditor() {
                     type="checkbox"
                     checked={intent.exportRequirements.html}
                     onChange={e => handleNestedChange('exportRequirements', 'html', e.target.checked)}
-                  >
+                  />
                   Accessible HTML
                 </label>
                 <label>
@@ -367,7 +367,7 @@ export function IntentEditor() {
                     type="checkbox"
                     checked={intent.exportRequirements.svgDiagrams}
                     onChange={e => handleNestedChange('exportRequirements', 'svgDiagrams', e.target.checked)}
-                  >
+                  />
                   SVG Diagrams
                 </label>
                 <label>
@@ -375,7 +375,7 @@ export function IntentEditor() {
                     type="checkbox"
                     checked={intent.exportRequirements.chartTables}
                     onChange={e => handleNestedChange('exportRequirements', 'chartTables', e.target.checked)}
-                  >
+                  />
                   Chart Data Tables
                 </label>
               </div>

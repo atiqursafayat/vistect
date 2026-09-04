@@ -2,7 +2,7 @@
 // Decision Queue (Alt+U)
 // ============================================================================
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useProject, useProjectDecisions, useUnapprovedDecisionCount } from '../../state';
 import type { VisualDecision, DecisionOption } from '@vistect/domain/schema';
 import { useAnnouncements } from '../../app/Providers';
@@ -209,7 +209,7 @@ export function DecisionQueue({ id }: { id: string }) {
                         Reject
                       </button>
                     </>
-                  }}
+                  )}
                   {decision.status === 'rejected' && (
                     <button
                       className="btn btn-secondary btn-sm"
@@ -271,12 +271,4 @@ export function DecisionQueue({ id }: { id: string }) {
       </footer>
     </section>
   );
-}
-
-function useState<T>(initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
-  let state = initial;
-  const setState = (newState: T | ((prev: T) => T)) => {
-    state = typeof newState === 'function' ? (newState as (prev: T) => T)(state) : newState;
-  };
-  return [state, setState];
 }

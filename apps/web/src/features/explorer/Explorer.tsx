@@ -173,7 +173,7 @@ export function Explorer({ id }: { id: string }) {
             checked={filter.hasWarnings}
             onChange={e => setFilter(prev => ({ ...prev, hasWarnings: e.target.checked }))}
             aria-label="Show only objects with warnings"
-          >
+          />
             <span>Warnings only</span>
           </label>
 

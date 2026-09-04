@@ -3,7 +3,7 @@
 // ============================================================================
 
 import React from 'react';
-import { useStore, selectSidebarOpen, selectSidebarWidth, selectCurrentView } from '../../state';
+import { useStore, selectSidebarOpen, selectSidebarWidth, selectCurrentView } from '../state';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const sidebarOpen = useStore(selectSidebarOpen);

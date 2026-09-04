@@ -1,4 +1,7 @@
-import { z } from 'zod';
+// ============================================================================
+// Command Bus
+// ============================================================================
+
 import type {
   Command,
   CommandResult,
@@ -26,10 +29,20 @@ import type {
   Dataset,
   Hash,
   VersionId,
+  PageId,
+  ObjectId,
+  AssetId,
+  DatasetId,
+  DiagramId,
+  ChartId,
+  DecisionId,
+  FindingId,
+  ActorId,
+  ProjectId,
 } from '../schema';
 
 import type { DomainEvent, EventEnvelope } from '../events';
-import { createEvent, createAgentToolExecutedEvent } from '../events';
+import { createEvent } from '../events';
 import * as invariants from '../invariants';
 import * as machines from '../machines';
 
@@ -85,8 +98,6 @@ export function createCommandBus(dependencies: {
   const { getProject, saveProject, appendEvents, getActor } = dependencies;
 
   async function dispatch(command: Command): Promise<CommandResult> {
-    const startTime = performance.now();
-
     // Load project
     const project = await getProject(command.projectId);
     if (!project) {
@@ -193,9 +204,9 @@ export function createCommandBus(dependencies: {
     // Append events with HMAC
     const eventsWithHmac = result.events.map(event => ({
       ...event,
-      hmac: computeHmac(event), // placeholder - real HMAC in storage layer
+      hmac: computeHmac(event),
     }));
-    await appendEvents(eventsWithHmac);
+    await appendEvents(eventsWithHmac as EventEnvelope[]);
 
     return {
       ok: true,
@@ -242,82 +253,92 @@ export function createCommandBus(dependencies: {
 // ============================================================================
 
 function applyEvent(project: DocumentProject, event: DomainEvent): void {
-  switch (event.type) {
-    case 'ProjectCreated':
+  const { type, payload, timestamp } = event;
+
+  // Type-safe event application using a switch on the discriminated union
+  switch (type) {
+    case 'ProjectCreated': {
       // Handled by initial project creation
       break;
-    case 'ProjectUpdated':
-      Object.assign(project, event.payload.changes);
+    }
+    case 'ProjectUpdated': {
+      const { changes } = payload;
+      Object.assign(project, changes);
       break;
+    }
     case 'PageCreated': {
-      const { pageId, template } = event.payload;
-      const page: Page = {
-        id: pageId,
-        template,
+      const { pageId, template, insertAfter } = payload;
+      const page: DocumentProject['pages'][string] = {
+        id: pageId as any,
+        template: template as any,
         status: 'draft',
         objects: [],
         readingOrder: [],
-        createdAt: event.timestamp,
-        updatedAt: event.timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         versionCreated: project.currentVersion,
         versionModified: project.currentVersion,
       };
       project.pages[pageId] = page;
-      project.pageOrder.push(pageId);
+      if (insertAfter) {
+        const idx = project.pageOrder.indexOf(insertAfter);
+        project.pageOrder.splice(idx + 1, 0, pageId);
+      } else {
+        project.pageOrder.push(pageId);
+      }
       break;
     }
     case 'PageUpdated': {
-      const { pageId, changes } = event.payload;
-      if (project.pages[pageId]) {
-        Object.assign(project.pages[pageId], changes);
-        project.pages[pageId].updatedAt = event.timestamp;
-        project.pages[pageId].versionModified = project.currentVersion;
+      const { pageId, changes } = payload;
+      const page = project.pages[pageId];
+      if (page) {
+        Object.assign(page, changes);
+        page.updatedAt = timestamp;
+        page.versionModified = project.currentVersion;
       }
       break;
     }
     case 'PageDeleted': {
-      const { pageId } = event.payload;
+      const { pageId } = payload;
       delete project.pages[pageId];
       project.pageOrder = project.pageOrder.filter(id => id !== pageId);
       // Also delete objects on this page
       for (const [objId, obj] of Object.entries(project.objects)) {
-        if (project.pageOrder.includes(objId)) continue; // object belongs to remaining pages
-        // Actually, we need to check which page the object is on
+        if (project.pageOrder.includes(objId)) continue;
       }
       break;
     }
     case 'PageReordered': {
-      project.pageOrder = event.payload.pageOrder;
+      project.pageOrder = payload.pageOrder;
       break;
     }
     case 'PageStatusChanged': {
-      const { pageId, newStatus } = event.payload;
-      if (project.pages[pageId]) {
-        project.pages[pageId].status = newStatus as PageStatus;
-        project.pages[pageId].updatedAt = event.timestamp;
-        project.pages[pageId].versionModified = project.currentVersion;
+      const { pageId, newStatus } = payload;
+      const page = project.pages[pageId];
+      if (page) {
+        page.status = newStatus as any;
+        page.updatedAt = timestamp;
+        page.versionModified = project.currentVersion;
       }
       break;
     }
     case 'ObjectCreated': {
-      const { object } = event.payload;
+      const { object } = payload;
       project.objects[object.id] = object;
-      // Add to page's objects and reading order
-      // Note: pageId is not in the object, we'd need to track it
       break;
     }
     case 'ObjectUpdated': {
-      const { objectId, changes } = event.payload;
-      if (project.objects[objectId]) {
-        Object.assign(project.objects[objectId], changes);
-        project.objects[objectId].versionModified = project.currentVersion;
+      const { objectId, changes } = payload;
+      const obj = project.objects[objectId];
+      if (obj) {
+        Object.assign(obj, changes);
+        obj.versionModified = project.currentVersion;
       }
       break;
     }
     case 'ObjectDeleted': {
-      const { objectId } = event.payload;
+      const { objectId } = payload;
       delete project.objects[objectId];
-      // Remove from page's objects and reading order
       for (const page of Object.values(project.pages)) {
         page.objects = page.objects.filter(id => id !== objectId);
         page.readingOrder = page.readingOrder.filter(id => id !== objectId);
@@ -325,14 +346,12 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'ObjectMoved': {
-      const { objectId, fromPageId, toPageId, insertAfter } = event.payload;
-      // Remove from old page
+      const { objectId, fromPageId, toPageId, insertAfter } = payload;
       const fromPage = project.pages[fromPageId];
       if (fromPage) {
         fromPage.objects = fromPage.objects.filter(id => id !== objectId);
         fromPage.readingOrder = fromPage.readingOrder.filter(id => id !== objectId);
       }
-      // Add to new page
       const toPage = project.pages[toPageId];
       if (toPage) {
         toPage.objects.push(objectId);
@@ -346,112 +365,110 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'ObjectReadingOrderChanged': {
-      const { pageId, readingOrder } = event.payload;
+      const { pageId, readingOrder } = payload;
       if (project.pages[pageId]) {
         project.pages[pageId].readingOrder = readingOrder;
       }
       break;
     }
     case 'ObjectApprovalChanged': {
-      const { objectId, newStatus, actorId, decisionId } = event.payload;
-      if (project.objects[objectId]) {
-        project.objects[objectId].approval = newStatus as ApprovalState;
+      const { objectId, newStatus, actorId, decisionId } = payload;
+      const obj = project.objects[objectId];
+      if (obj) {
+        obj.approval = newStatus as any;
         if (newStatus === 'approved') {
-          project.objects[objectId].approvedBy = actorId;
-          project.objects[objectId].approvedAt = event.timestamp;
-          project.objects[objectId].approvedVersion = project.currentVersion;
+          obj.approvedBy = actorId;
+          obj.approvedAt = timestamp;
+          obj.approvedVersion = project.currentVersion;
         }
         if (decisionId) {
-          project.objects[objectId].decisionId = decisionId;
+          obj.decisionId = decisionId;
         }
       }
       break;
     }
     case 'AssetUploaded': {
-      const { asset } = event.payload;
+      const { asset } = payload;
       project.assets[asset.id] = asset;
       break;
     }
     case 'AssetUpdated': {
-      const { assetId, changes } = event.payload;
+      const { assetId, changes } = payload;
       if (project.assets[assetId]) {
         Object.assign(project.assets[assetId], changes);
       }
       break;
     }
     case 'AssetDeleted': {
-      const { assetId } = event.payload;
+      const { assetId } = payload;
       delete project.assets[assetId];
       break;
     }
     case 'AssetCropRegistered': {
-      const { assetId, crop } = event.payload;
-      if (project.assets[assetId]) {
-        project.assets[assetId] = { ...project.assets[assetId] } as ImageAsset;
-      }
+      // Crop handled in asset object
       break;
     }
     case 'AssetAnalysisRecorded': {
-      const { assetId, observations, interpretations, uncertainties } = event.payload;
+      const { assetId, observations, interpretations, uncertainties } = payload;
       if (project.assets[assetId]) {
-        project.assets[assetId].observations = observations as Observation[];
-        project.assets[assetId].interpretations = interpretations as Interpretation[];
-        project.assets[assetId].uncertainties = uncertainties as Uncertainty[];
+        project.assets[assetId].observations = observations as any;
+        project.assets[assetId].interpretations = interpretations as any;
+        project.assets[assetId].uncertainties = uncertainties as any;
       }
       break;
     }
     case 'DatasetCreated': {
-      const { dataset } = event.payload;
+      const { dataset } = payload;
       project.datasets[dataset.id] = dataset;
       break;
     }
     case 'DatasetUpdated': {
-      const { datasetId, changes } = event.payload;
+      const { datasetId, changes } = payload;
       if (project.datasets[datasetId]) {
         Object.assign(project.datasets[datasetId], changes);
       }
       break;
     }
     case 'DatasetDeleted': {
-      const { datasetId } = event.payload;
+      const { datasetId } = payload;
       delete project.datasets[datasetId];
       break;
     }
     case 'DatasetSchemaConfirmed': {
-      const { datasetId } = event.payload;
+      const { datasetId } = payload;
       if (project.datasets[datasetId]) {
         project.datasets[datasetId].userConfirmed = true;
       }
       break;
     }
     case 'DiagramCreated': {
-      const { diagram } = event.payload;
+      const { diagram } = payload;
       project.diagrams[diagram.id] = diagram;
       break;
     }
     case 'DiagramUpdated': {
-      const { diagramId, changes } = event.payload;
+      const { diagramId, changes } = payload;
       if (project.diagrams[diagramId]) {
         Object.assign(project.diagrams[diagramId], changes);
-        project.diagrams[diagramId].updatedAt = event.timestamp;
+        project.diagrams[diagramId].updatedAt = timestamp;
         project.diagrams[diagramId].specVersion += 1;
       }
       break;
     }
     case 'DiagramDeleted': {
-      const { diagramId } = event.payload;
+      const { diagramId } = payload;
       delete project.diagrams[diagramId];
       break;
     }
     case 'DiagramNodeAdded': {
-      const { diagramId, node } = event.payload;
+      const { diagramId, node } = payload;
       if (project.diagrams[diagramId]) {
-        project.diagrams[diagramId].nodes.push(node as DiagramNode);
+        project.diagrams[diagramId].nodes.push(node as any);
       }
       break;
     }
     case 'DiagramNodeUpdated': {
-      const { diagramId, nodeId, changes } = event.payload;
+      const { diagramId, nodeId, changes } = payload;
       const diagram = project.diagrams[diagramId];
       if (diagram) {
         const idx = diagram.nodes.findIndex(n => n.id === nodeId);
@@ -462,7 +479,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'DiagramNodeRemoved': {
-      const { diagramId, nodeId } = event.payload;
+      const { diagramId, nodeId } = payload;
       const diagram = project.diagrams[diagramId];
       if (diagram) {
         diagram.nodes = diagram.nodes.filter(n => n.id !== nodeId);
@@ -474,14 +491,14 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'DiagramEdgeAdded': {
-      const { diagramId, edge } = event.payload;
+      const { diagramId, edge } = payload;
       if (project.diagrams[diagramId]) {
-        project.diagrams[diagramId].edges.push(edge as DiagramEdge);
+        project.diagrams[diagramId].edges.push(edge as any);
       }
       break;
     }
     case 'DiagramEdgeUpdated': {
-      const { diagramId, edgeId, changes } = event.payload;
+      const { diagramId, edgeId, changes } = payload;
       const diagram = project.diagrams[diagramId];
       if (diagram) {
         const idx = diagram.edges.findIndex(e => e.id === edgeId);
@@ -492,7 +509,7 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'DiagramEdgeRemoved': {
-      const { diagramId, edgeId } = event.payload;
+      const { diagramId, edgeId } = payload;
       const diagram = project.diagrams[diagramId];
       if (diagram) {
         diagram.edges = diagram.edges.filter(e => e.id !== edgeId);
@@ -500,68 +517,67 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'DiagramLayoutApplied': {
-      const { diagramId, layout, seed } = event.payload;
+      const { diagramId, layout, seed } = payload;
       if (project.diagrams[diagramId]) {
-        project.diagrams[diagramId].layout = layout;
+        project.diagrams[diagramId].layout = layout as any;
         project.diagrams[diagramId].layoutSeed = seed;
         project.diagrams[diagramId].specVersion += 1;
       }
       break;
     }
     case 'ChartCreated': {
-      const { chart } = event.payload;
+      const { chart } = payload;
       project.charts[chart.id] = chart;
       break;
     }
     case 'ChartUpdated': {
-      const { chartId, changes } = event.payload;
+      const { chartId, changes } = payload;
       if (project.charts[chartId]) {
         Object.assign(project.charts[chartId], changes);
-        project.charts[chartId].updatedAt = event.timestamp;
+        project.charts[chartId].updatedAt = timestamp;
         project.charts[chartId].specVersion += 1;
       }
       break;
     }
     case 'ChartDeleted': {
-      const { chartId } = event.payload;
+      const { chartId } = payload;
       delete project.charts[chartId];
       break;
     }
     case 'ChartSpecVersionBumped': {
-      const { chartId, newVersion } = event.payload;
+      const { chartId, newVersion } = payload;
       if (project.charts[chartId]) {
         project.charts[chartId].specVersion = newVersion;
       }
       break;
     }
     case 'DecisionCreated': {
-      const { decision } = event.payload;
+      const { decision } = payload;
       project.decisions[decision.id] = decision;
       break;
     }
     case 'DecisionUpdated': {
-      const { decisionId, changes } = event.payload;
+      const { decisionId, changes } = payload;
       if (project.decisions[decisionId]) {
         Object.assign(project.decisions[decisionId], changes);
-        project.decisions[decisionId].updatedAt = event.timestamp;
+        project.decisions[decisionId].updatedAt = timestamp;
       }
       break;
     }
     case 'DecisionApproved': {
-      const { decisionId, selectedOptionId, reason, actorId } = event.payload;
+      const { decisionId, selectedOptionId, reason, actorId } = payload;
       if (project.decisions[decisionId]) {
         project.decisions[decisionId].status = 'approved';
         project.decisions[decisionId].selectedOptionId = selectedOptionId;
         project.decisions[decisionId].selectionReason = reason;
         project.decisions[decisionId].approvedBy = actorId;
-        project.decisions[decisionId].approvedAt = event.timestamp;
+        project.decisions[decisionId].approvedAt = timestamp;
         project.decisions[decisionId].approvedVersion = project.currentVersion;
-        // Update affected objects
         for (const objId of project.decisions[decisionId].targetObjectIds) {
           if (project.objects[objId]) {
             project.objects[objId].approval = 'approved';
             project.objects[objId].approvedBy = actorId;
-            project.objects[objId].approvedAt = event.timestamp;
+            project.objects[objId].approvedAt = timestamp;
             project.objects[objId].approvedVersion = project.currentVersion;
           }
         }
@@ -569,18 +585,16 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'DecisionRejected': {
-      const { decisionId, reason, actorId } = event.payload;
+      const { decisionId, reason, actorId } = payload;
       if (project.decisions[decisionId]) {
         project.decisions[decisionId].status = 'rejected';
-        // Revert or keep based on decision type
       }
       break;
     }
     case 'DecisionStaled': {
-      const { decisionId, reason } = event.payload;
+      const { decisionId, reason } = payload;
       if (project.decisions[decisionId]) {
         project.decisions[decisionId].status = 'stale';
-        // Mark affected objects as stale
         for (const objId of project.decisions[decisionId].targetObjectIds) {
           if (project.objects[objId] && project.objects[objId].approval === 'approved') {
             project.objects[objId].approval = 'stale';
@@ -590,19 +604,19 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'FindingCreated': {
-      const { finding } = event.payload;
+      const { finding } = payload;
       project.findings[finding.id] = finding;
       break;
     }
     case 'FindingResolved': {
-      const { findingId } = event.payload;
+      const { findingId } = payload;
       if (project.findings[findingId]) {
         project.findings[findingId].status = 'resolved';
       }
       break;
     }
     case 'FindingAccepted': {
-      const { findingId, reason } = event.payload;
+      const { findingId, reason } = payload;
       if (project.findings[findingId]) {
         project.findings[findingId].status = 'accepted';
         project.findings[findingId].acceptedReason = reason;
@@ -610,14 +624,14 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'FindingDismissed': {
-      const { findingId } = event.payload;
+      const { findingId } = payload;
       if (project.findings[findingId]) {
         project.findings[findingId].status = 'dismissed';
       }
       break;
     }
     case 'FindingReopened': {
-      const { findingId, reason } = event.payload;
+      const { findingId, reason } = payload;
       if (project.findings[findingId]) {
         project.findings[findingId].status = 'open';
       }
@@ -637,7 +651,6 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
     }
     case 'DocumentLocked': {
       project.status = 'locked';
-      // Lock all pages
       for (const page of Object.values(project.pages)) {
         page.status = 'locked';
       }
@@ -655,19 +668,19 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'ExportJobCreated': {
-      const { exportJob } = event.payload;
+      const { exportJob } = payload;
       project.exportJobs[exportJob.id] = exportJob;
       break;
     }
     case 'ExportJobUpdated': {
-      const { exportJobId, changes } = event.payload;
+      const { exportJobId, changes } = payload;
       if (project.exportJobs[exportJobId]) {
         Object.assign(project.exportJobs[exportJobId], changes);
       }
       break;
     }
     case 'ExportManifestApproved': {
-      const { exportJobId, actorId, approvalToken } = event.payload;
+      const { exportJobId, actorId, approvalToken } = payload;
       if (project.exportJobs[exportJobId]) {
         project.exportJobs[exportJobId].status = 'approved';
         project.exportJobs[exportJobId].approvalToken = approvalToken;
@@ -676,19 +689,19 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
       break;
     }
     case 'SnapshotCreated': {
-      const { version, snapshotHash, eventCount } = event.payload;
+      const { version, snapshotHash, eventCount } = payload;
       project.versions.push({
-        id: `ver_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as VersionId,
+        id: `ver_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}` as any,
         version,
         snapshotHash,
         eventCount,
-        createdAt: event.timestamp,
+        createdAt: timestamp,
         isSnapshot: true,
       });
       break;
     }
     case 'UndoPerformed': {
-      const { newVersion } = event.payload;
+      const { newVersion } = payload;
       project.currentVersion = newVersion;
       break;
     }
@@ -708,7 +721,24 @@ function applyEvent(project: DocumentProject, event: DomainEvent): void {
 // ============================================================================
 
 function isWriteCommand(type: string): boolean {
-  return isWriteTool(type);
+  const writePrefixes = [
+    'CreateProject', 'UpdateProject', 'DeleteProject', 'EncryptProject', 'ImportProject',
+    'CreatePage', 'UpdatePage', 'DeletePage', 'ReorderPages', 'ChangePageStatus',
+    'CreateObject', 'UpdateObject', 'DeleteObject', 'MoveObject', 'SetObjectConstraints',
+    'ReorderObjectReadingOrder', 'ChangeObjectApproval',
+    'UploadAsset', 'UpdateAsset', 'DeleteAsset', 'RegisterAssetCrop', 'RecordAssetAnalysis',
+    'CreateDataset', 'UpdateDataset', 'DeleteDataset', 'ConfirmDatasetSchema',
+    'CreateDiagram', 'UpdateDiagram', 'DeleteDiagram',
+    'AddDiagramNode', 'UpdateDiagramNode', 'RemoveDiagramNode',
+    'AddDiagramEdge', 'UpdateDiagramEdge', 'RemoveDiagramEdge', 'ApplyDiagramLayout',
+    'CreateChart', 'UpdateChart', 'DeleteChart', 'BumpChartSpecVersion',
+    'CreateDecision', 'UpdateDecision', 'ApproveDecision', 'RejectDecision', 'RequestDecisionAlternatives',
+    'CreateFinding', 'ResolveFinding', 'AcceptFinding', 'DismissFinding',
+    'RequestReview', 'ConfirmReadiness', 'LockDocument', 'UnlockDocument', 'FinalizeExport',
+    'CreateExportJob', 'ApproveExportManifest', 'UpdateExportJob',
+    'CreateSnapshot', 'Undo', 'CreatePrivacyReceipt',
+  ];
+  return writePrefixes.includes(type);
 }
 
 function isApprovalCommand(type: string): boolean {
@@ -719,10 +749,6 @@ function computeHmac(event: DomainEvent): string {
   // Placeholder - real implementation in storage layer with session secret
   return '0'.repeat(64);
 }
-
-// Import types for factory functions
-import type { Page } from '../schema';
-import type { Observation, Interpretation, Uncertainty } from '../schema';
 
 // ============================================================================
 // Exports

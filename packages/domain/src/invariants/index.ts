@@ -306,25 +306,3 @@ export function checkAll(project: DocumentProject): string[] {
   }
   return errors;
 }
-
-// ============================================================================
-// Individual exports for testing
-// ============================================================================
-
-export {
-  checkI01,
-  checkI02,
-  checkI03,
-  checkI04,
-  checkI05,
-  checkI06,
-  checkI07,
-  checkI08,
-  checkI09,
-  checkI10,
-  checkI11,
-  checkI12,
-  checkI13,
-  checkI14,
-  checkI15,
-};
