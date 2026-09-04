@@ -1,9 +1,19 @@
 // ============================================================================
 // Graph SVG Export
 // ============================================================================
+//
+// Produces a sanitised, screen-reader-labelled SVG plus a keyboard-navigable
+// HTML fallback (spec §12, AC F-3.x §2/§3).
+//
+// SECURITY: node and edge labels are authored or agent-supplied, so every
+// interpolated value is XML-escaped via `@vistect/domain/text`. This module
+// previously carried its own `escapeXml`, which had been reduced to an identity
+// function and left SVG export unescaped.
 
-import type { Diagram, GraphNode, GraphEdge } from '../index';
+import { escapeXml } from '@vistect/domain/text';
+
 import { getBoundsCenter } from './geometry';
+import type { Bounds, Diagram, GraphEdge, GraphNode } from './model';
 
 export interface SVGExportOptions {
   padding?: number;
@@ -12,17 +22,35 @@ export interface SVGExportOptions {
   theme?: 'light' | 'dark';
 }
 
-const DEFAULT_COLORS = {
+interface ThemeColors {
+  background: string;
+  nodeFill: string;
+  nodeStroke: string;
+  nodeText: string;
+  edgeStroke: string;
+  edgeText: string;
+  decisionFill: string;
+  startFill: string;
+  endFill: string;
+  decisionEdgeStroke: string;
+}
+
+/**
+ * Palettes chosen for WCAG 2.2 AA contrast (>= 4.5:1) between each fill and its
+ * paired text colour, so labels stay legible in both themes.
+ */
+const THEMES: Readonly<Record<'light' | 'dark', ThemeColors>> = {
   light: {
     background: '#ffffff',
     nodeFill: '#ffffff',
     nodeStroke: '#1a1a2e',
     nodeText: '#1a1a2e',
     edgeStroke: '#495057',
-    edgeText: '#495057',
+    edgeText: '#343a40',
     decisionFill: '#fff3cd',
     startFill: '#d4edda',
     endFill: '#f8d7da',
+    decisionEdgeStroke: '#a61e1e',
   },
   dark: {
     background: '#1a1a2e',
@@ -30,133 +58,193 @@ const DEFAULT_COLORS = {
     nodeStroke: '#e9ecef',
     nodeText: '#f8f9fa',
     edgeStroke: '#adb5bd',
-    edgeText: '#adb5bd',
+    edgeText: '#ced4da',
     decisionFill: '#664d03',
     startFill: '#155724',
     endFill: '#721c24',
+    decisionEdgeStroke: '#ff8787',
   },
 };
 
+const EMPTY_DIAGRAM_BOUNDS: Bounds = { x: 0, y: 0, w: 400, h: 300 };
+
+/** Stroke width and dash pattern for each edge style. */
+function edgeStrokeStyle(style: GraphEdge['style']): { width: number; dashArray: string | null } {
+  switch (style) {
+    case 'dashed':
+      return { width: 2, dashArray: '5,5' };
+    case 'dotted':
+      return { width: 1, dashArray: '2,2' };
+    case 'solid':
+      return { width: 2, dashArray: null };
+  }
+}
+
+function nodeFill(node: GraphNode, colors: ThemeColors): string {
+  switch (node.type) {
+    case 'decision':
+      return colors.decisionFill;
+    case 'start':
+      return colors.startFill;
+    case 'end':
+      return colors.endFill;
+    case 'process':
+    case 'input_output':
+    case 'group':
+      return colors.nodeFill;
+  }
+}
+
 export function exportDiagramSVG(diagram: Diagram, options: SVGExportOptions = {}): string {
   const { padding = 40, showLabels = true, showEdgeLabels = true, theme = 'light' } = options;
-  const colors = DEFAULT_COLORS[theme];
+  const colors = THEMES[theme];
 
-  // Calculate bounds
   const bounds = getDiagramBounds(diagram);
   const width = bounds.w + 2 * padding;
   const height = bounds.h + 2 * padding;
+  const originX = bounds.x - padding;
+  const originY = bounds.y - padding;
 
-  let svg = `<svg width="${width}" height="${height}" viewBox="${-padding} ${-padding} ${width} ${height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${diagram.type} diagram">`;
-  svg += `<title>${diagram.type} diagram</title>`;
-  svg += `<defs>`;
-  svg += `<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">`;
-  svg += `<polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />`;
-  svg += `</marker>`;
-  svg += `</defs>`;
+  const accessibleName = diagram.accessibility.altText ?? `${diagram.type} diagram`;
+  const parts: string[] = [];
 
-  // Background
-  svg += `<rect x="${-padding}" y="${-padding}" width="${width}" height="${height}" fill="${colors.background}" />`;
+  parts.push(
+    `<svg width="${width}" height="${height}" viewBox="${originX} ${originY} ${width} ${height}" ` +
+      `xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeXml(accessibleName)}">`
+  );
+  parts.push(`<title>${escapeXml(accessibleName)}</title>`);
+  if (diagram.accessibility.longDescription !== undefined) {
+    parts.push(`<desc>${escapeXml(diagram.accessibility.longDescription)}</desc>`);
+  }
 
-  // Edges
+  // A single `<defs>` block: two markers with the same id previously made the
+  // second definition dead, so decision edges silently lost their arrowhead.
+  parts.push('<defs>');
+  parts.push(
+    '<marker id="vistect-arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">' +
+      `<polygon points="0 0, 10 3.5, 0 7" fill="${colors.edgeStroke}" />` +
+      '</marker>'
+  );
+  parts.push(
+    '<marker id="vistect-arrowhead-decision" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">' +
+      `<polygon points="0 0, 10 3.5, 0 7" fill="${colors.decisionEdgeStroke}" />` +
+      '</marker>'
+  );
+  parts.push('</defs>');
+
+  parts.push(
+    `<rect x="${originX}" y="${originY}" width="${width}" height="${height}" fill="${colors.background}" />`
+  );
+
+  const nodesById = new Map(diagram.nodes.map((node) => [node.id, node]));
+
+  // Edges are drawn before nodes so node fills occlude line ends.
   for (const edge of diagram.edges) {
-    const from = diagram.nodes.find(n => n.id === edge.from);
-    const to = diagram.nodes.find(n => n.id === edge.to);
-    if (!from || !to) continue;
+    const from = nodesById.get(edge.from);
+    const to = nodesById.get(edge.to);
+    if (from === undefined || to === undefined) continue;
 
     const fromCenter = getBoundsCenter(from.bounds);
     const toCenter = getBoundsCenter(to.bounds);
+    const { width: strokeWidth, dashArray } = edgeStrokeStyle(edge.style);
+    const stroke = edge.isDecisionOutcome ? colors.decisionEdgeStroke : colors.edgeStroke;
+    const marker = edge.isDecisionOutcome ? 'vistect-arrowhead-decision' : 'vistect-arrowhead';
 
-    const strokeColor = edge.isDecisionOutcome ? '#c92a2a' : colors.edgeStroke;
-    const strokeWidth = edge.style === 'dashed' ? '2' : edge.style === 'dotted' ? '1' : '2';
-    const strokeDash = edge.style === 'dashed' ? '5,5' : edge.style === 'dotted' ? '2,2' : 'none';
+    parts.push(
+      `<line x1="${fromCenter.x}" y1="${fromCenter.y}" x2="${toCenter.x}" y2="${toCenter.y}" ` +
+        `stroke="${stroke}" stroke-width="${strokeWidth}"` +
+        (dashArray === null ? '' : ` stroke-dasharray="${dashArray}"`) +
+        ` marker-end="url(#${marker})" />`
+    );
 
-    svg += `<line x1="${fromCenter.x}" y1="${fromCenter.y}" x2="${toCenter.x}" y2="${toCenter.y}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-dasharray="${strokeDash}" marker-end="url(#arrowhead)" />`;
-
-    if (showEdgeLabels && edge.label) {
+    if (showEdgeLabels && edge.label !== undefined && edge.label !== '') {
       const midX = (fromCenter.x + toCenter.x) / 2;
       const midY = (fromCenter.y + toCenter.y) / 2;
-      svg += `<text x="${midX}" y="${midY}" text-anchor="middle" dominant-baseline="middle" font-size="11" fill="${colors.edgeText}" font-family="system-ui, sans-serif">${edge.label}</text>`;
+      parts.push(
+        `<text x="${midX}" y="${midY}" text-anchor="middle" dominant-baseline="middle" ` +
+          `font-size="11" font-family="system-ui, sans-serif" fill="${colors.edgeText}">${escapeXml(edge.label)}</text>`
+      );
     }
   }
 
-  // Arrowhead marker
-  svg += `<defs>`;
-  svg += `<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">`;
-  svg += `<polygon points="0 0, 10 3.5, 0 7" fill="${colors.edgeStroke}" />`;
-  svg += `</marker>`;
-  svg += `</defs>`;
-
-  // Nodes
   for (const node of diagram.nodes) {
     const { x, y, w, h } = node.bounds;
-    const center = { x: x + w / 2, y: y + h / 2 };
+    const fill = nodeFill(node, colors);
 
-    // Node fill based on type
-    let fill = colors.nodeFill;
-    let stroke = colors.nodeStroke;
-    if (node.type === 'decision') fill = colors.decisionFill;
-    else if (node.type === 'start') fill = colors.startFill;
-    else if (node.type === 'end') fill = colors.endFill;
-
-    const rx = node.type === 'decision' ? 0 : 4;
-
-    // Node shape
     if (node.type === 'decision') {
-      // Diamond
       const cx = x + w / 2;
       const cy = y + h / 2;
-      svg += `<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}" fill="${fill}" stroke="${colors.nodeStroke}" stroke-width="2" />`;
+      parts.push(
+        `<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}" ` +
+          `fill="${fill}" stroke="${colors.nodeStroke}" stroke-width="2" />`
+      );
     } else {
-      // Rectangle
-      svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" ry="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`;
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" ry="4" ` +
+          `fill="${fill}" stroke="${colors.nodeStroke}" stroke-width="2" />`
+      );
     }
 
-    // Label
     if (showLabels) {
-      svg += `<text x="${x + w / 2}" y="${y + h / 2 + 5}" text-anchor="middle" dominant-baseline="middle" font-size="12" font-family="system-ui, sans-serif" fill="${colors.nodeText}">${escapeXml(node.label)}</text>`;
+      parts.push(
+        `<text x="${x + w / 2}" y="${y + h / 2}" text-anchor="middle" dominant-baseline="middle" ` +
+          `font-size="12" font-family="system-ui, sans-serif" fill="${colors.nodeText}">${escapeXml(node.label)}</text>`
+      );
     }
   }
 
-  svg += `</svg>`;
-  return svg;
+  parts.push('</svg>');
+  return parts.join('');
 }
 
-function getDiagramBounds(diagram: { nodes: { bounds: { x: number; y: number; w: number; h: number } }[] }): { x: number; y: number; w: number; h: number } {
-  if (!diagram.nodes.length) return { x: 0, y: 0, w: 400, h: 300 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+function getDiagramBounds(diagram: Pick<Diagram, 'nodes'>): Bounds {
+  if (diagram.nodes.length === 0) return EMPTY_DIAGRAM_BOUNDS;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
   for (const node of diagram.nodes) {
     minX = Math.min(minX, node.bounds.x);
     minY = Math.min(minY, node.bounds.y);
     maxX = Math.max(maxX, node.bounds.x + node.bounds.w);
     maxY = Math.max(maxY, node.bounds.y + node.bounds.h);
   }
+
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, '&apos;');
-}
+/**
+ * Keyboard-navigable HTML rendering of the graph (AC F-3.x §2).
+ *
+ * Nested lists expose each node with its outgoing connections, so a screen
+ * reader user can traverse the topology without the SVG.
+ */
+export function exportAccessibleHTML(diagram: Diagram): string {
+  const nodesById = new Map(diagram.nodes.map((node) => [node.id, node]));
+  const parts: string[] = ['<nav class="diagram-nodes" aria-label="Diagram nodes"><ul>'];
 
-export function exportAccessibleHTML(diagram: any): string {
-  let html = `<nav class="diagram-nodes" aria-label="Diagram nodes">`;
-  html += `<ul>`;
   for (const node of diagram.nodes) {
-    html += `<li>${node.label} (${node.type})`;
-    const outgoing = diagram.edges.filter(e => e.from === node.id);
+    parts.push(`<li><span class="node-label">${escapeXml(node.label)}</span>`);
+    parts.push(` <span class="node-type">(${escapeXml(node.type)})</span>`);
+
+    const outgoing = diagram.edges.filter((edge) => edge.from === node.id);
     if (outgoing.length > 0) {
-      html += ` → ${outgoing.map(e => {
-        const target = diagram.nodes.find(n => n.id === e.to);
-        return `${e.label || ''} ${target?.label || e.to}`.trim();
-      }).join(', ')}`;
+      parts.push('<ul class="node-connections">');
+      for (const edge of outgoing) {
+        const target = nodesById.get(edge.to);
+        const targetLabel = target?.label ?? edge.to;
+        const condition =
+          edge.label !== undefined && edge.label !== '' ? `${escapeXml(edge.label)}: ` : '';
+        parts.push(`<li>${condition}leads to ${escapeXml(targetLabel)}</li>`);
+      }
+      parts.push('</ul>');
     }
-    html += `</li>`;
+
+    parts.push('</li>');
   }
-  html += `</ul>`;
-  html += `</nav>`;
-  return html;
+
+  parts.push('</ul></nav>');
+  return parts.join('');
 }

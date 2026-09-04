@@ -1,8 +1,16 @@
 // ============================================================================
 // Graph Topology Validation
 // ============================================================================
+//
+// Structural checks from spec §12.4: disconnected nodes, unreachable nodes,
+// cycles, missing decision outcomes, duplicate edges, ambiguous labels.
+//
+// Errors block; warnings surface for review. The distinction depends on diagram
+// type: a cycle is invalid in a process flow but expected in a system
+// architecture.
 
-import type { Diagram, GraphNode, GraphEdge } from '../index';
+import type { Diagram, NodeId } from './model';
+import { buildAdjacency, findReachableNodes, hasCycle } from './traversal';
 
 export interface ValidationResult {
   valid: boolean;
@@ -10,15 +18,40 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+/** Diagram types that model a directed, acyclic flow with a single entry point. */
+const ACYCLIC_FLOW_TYPES = new Set<Diagram['type']>(['process_flow', 'decision_tree']);
+
 export function validateStructure(diagram: Diagram): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
-
   const { nodes, edges } = diagram;
+  const isAcyclicFlow = ACYCLIC_FLOW_TYPES.has(diagram.type);
 
-  // Check for disconnected nodes
+  // Referential integrity first: later checks assume edges point at real nodes.
+  const nodeIds = new Set<NodeId>(nodes.map((n) => n.id));
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.from)) {
+      errors.push(`Edge ${edge.id} references missing source node ${edge.from}`);
+    }
+    if (!nodeIds.has(edge.to)) {
+      errors.push(`Edge ${edge.id} references missing target node ${edge.to}`);
+    }
+  }
+  if (diagram.entryNodeId !== undefined && !nodeIds.has(diagram.entryNodeId)) {
+    errors.push(`Entry node ${diagram.entryNodeId} does not exist`);
+  }
+  for (const terminalId of diagram.terminalNodeIds) {
+    if (!nodeIds.has(terminalId)) {
+      errors.push(`Terminal node ${terminalId} does not exist`);
+    }
+  }
+  if (errors.length > 0) {
+    return { valid: false, errors, warnings };
+  }
+
+  // Disconnected nodes.
   if (nodes.length > 1) {
-    const connected = new Set<string>();
+    const connected = new Set<NodeId>();
     for (const edge of edges) {
       connected.add(edge.from);
       connected.add(edge.to);
@@ -30,128 +63,75 @@ export function validateStructure(diagram: Diagram): ValidationResult {
     }
   }
 
-  // Check unreachable nodes from entry
-  if (diagram.entryNodeId) {
+  // Reachability from the entry node.
+  if (diagram.entryNodeId !== undefined) {
     const reachable = findReachableNodes(diagram, diagram.entryNodeId);
     for (const node of nodes) {
-      if (!reachable.has(node.id) && nodes.length > 1) {
+      if (nodes.length > 1 && !reachable.has(node.id)) {
         warnings.push(`Node ${node.id} (${node.label}) is unreachable from entry`);
       }
     }
-  } else if (diagram.type === 'process_flow' || diagram.type === 'decision_tree') {
-    warnings.push('Diagram missing entry node');
+  } else if (isAcyclicFlow) {
+    // Reported once, as an error: a flow without an entry point has no defined
+    // reading order. The duplicate warning that used to accompany it is gone.
+    errors.push('Process/decision diagram missing entry node');
   }
 
-  // Check for cycles
+  // Cycles.
   if (hasCycle(diagram)) {
-    if (diagram.type === 'process_flow' || diagram.type === 'decision_tree') {
+    if (isAcyclicFlow) {
       errors.push('Diagram contains a cycle (invalid for process/decision types)');
     } else {
       warnings.push('Diagram contains a cycle');
     }
   }
 
-  // Check decision nodes have outcomes
+  // Decision nodes need both outcomes so every branch is navigable.
   for (const node of nodes) {
-    if (node.type === 'decision') {
-      const outgoing = edges.filter(e => e.from === node.id);
-      const hasYes = outgoing.some(e => e.outcomeLabel === 'yes' || e.outcomeLabel === 'true');
-      const hasNo = outgoing.some(e => e.outcomeLabel === 'no' || e.outcomeLabel === 'false');
-      if (!hasYes || !hasNo) {
-        errors.push(`Decision node ${node.id} missing ${!hasYes ? 'yes/true' : 'no/false'} outcome`);
-      }
+    if (node.type !== 'decision') continue;
+
+    const outgoing = edges.filter((e) => e.from === node.id);
+    const hasAffirmative = outgoing.some(
+      (e) => e.outcomeLabel === 'yes' || e.outcomeLabel === 'true'
+    );
+    const hasNegative = outgoing.some((e) => e.outcomeLabel === 'no' || e.outcomeLabel === 'false');
+
+    // Report each missing branch separately; the previous single message named
+    // only one even when both were absent.
+    if (!hasAffirmative) {
+      errors.push(`Decision node ${node.id} (${node.label}) missing yes/true outcome`);
+    }
+    if (!hasNegative) {
+      errors.push(`Decision node ${node.id} (${node.label}) missing no/false outcome`);
     }
   }
 
-  // Check for duplicate edges
+  // Duplicate edges (same endpoints and label).
   const edgeKeys = new Set<string>();
   for (const edge of edges) {
-    const key = `${edge.from}-${edge.to}-${edge.label || ''}`;
+    const key = `${edge.from}\u0000${edge.to}\u0000${edge.label ?? ''}`;
     if (edgeKeys.has(key)) {
       warnings.push(`Duplicate edge: ${edge.from} → ${edge.to}`);
     }
     edgeKeys.add(key);
   }
 
-  // Check for ambiguous edge labels
+  // Ambiguous branching: an unlabelled edge leaving a node that has several
+  // outgoing edges cannot be described unambiguously to a screen reader.
+  const outgoingCounts = buildAdjacency(diagram);
+  const reportedAmbiguous = new Set<NodeId>();
   for (const edge of edges) {
-    if (!edge.label) {
-      const outgoing = edges.filter(e => e.from === edge.from);
-      if (outgoing.length > 1) {
-        warnings.push(`Edge from ${edge.from} has no label but multiple outgoing edges exist`);
-      }
-    }
+    if (edge.label !== undefined && edge.label !== '') continue;
+    if ((outgoingCounts.get(edge.from)?.length ?? 0) <= 1) continue;
+    if (reportedAmbiguous.has(edge.from)) continue;
+
+    reportedAmbiguous.add(edge.from);
+    warnings.push(`Node ${edge.from} has multiple outgoing edges but at least one is unlabelled`);
   }
 
-  // Check entry/terminal nodes
-  if (!diagram.entryNodeId && (diagram.type === 'process_flow' || diagram.type === 'decision_tree')) {
-    errors.push('Process/decision diagram missing entry node');
-  }
   if (diagram.terminalNodeIds.length === 0) {
     warnings.push('Diagram missing terminal nodes');
   }
 
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings,
-  };
-}
-
-function findReachableNodes(diagram: any, entryId: string): Set<string> {
-  const reachable = new Set<string>();
-  const queue = [entryId];
-  const adjacency = new Map<string, string[]>();
-
-  for (const edge of diagram.edges) {
-    if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
-    adjacency.get(edge.from)!.push(edge.to);
-  }
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (reachable.has(current)) continue;
-    reachable.add(current);
-    const neighbors = adjacency.get(current) || [];
-    for (const neighbor of neighbors) {
-      if (!reachable.has(neighbor)) queue.push(neighbor);
-    }
-  }
-
-  return reachable;
-}
-
-function hasCycle(diagram: any): boolean {
-  const visited = new Set<string>();
-  const recStack = new Set<string>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const edge of diagram.edges) {
-    if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
-    adjacency.get(edge.from)!.push(edge.to);
-  }
-
-  function dfs(node: string): boolean {
-    visited.add(node);
-    recStack.add(node);
-
-    for (const neighbor of adjacency.get(node) || []) {
-      if (!visited.has(neighbor)) {
-        if (dfs(neighbor)) return true;
-      } else if (recStack.has(neighbor)) {
-        return true;
-      }
-    }
-
-    recStack.delete(node);
-    return false;
-  }
-
-  for (const node of diagram.nodes) {
-    if (!visited.has(node.id)) {
-      if (dfs(node.id)) return true;
-    }
-  }
-
-  return false;
+  return { valid: errors.length === 0, errors, warnings };
 }

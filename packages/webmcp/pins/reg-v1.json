@@ -1,0 +1,3136 @@
+{
+  "version": "1.0.0",
+  "specVersion": "chrome-149-origin-trial-2026-05",
+  "toolCount": 72,
+  "tools": [
+    {
+      "name": "accept_finding",
+      "description": "Accept a finding (risk acknowledged)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "findingId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for accepting risk"
+          }
+        },
+        "required": [
+          "projectId",
+          "findingId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "add_diagram_edge",
+      "description": "Add an edge to a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          },
+          "edge": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ],
+                "default": "solid"
+              },
+              "isDecisionOutcome": {
+                "type": "boolean",
+                "default": false
+              },
+              "outcomeLabel": {
+                "type": "string",
+                "enum": [
+                  "yes",
+                  "no",
+                  "true",
+                  "false",
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId",
+          "edge"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "add_diagram_node",
+      "description": "Add a node to a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          },
+          "node": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "start",
+                  "end",
+                  "process",
+                  "decision",
+                  "input_output",
+                  "group"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "h": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              },
+              "groupId": {
+                "type": "string"
+              },
+              "accessibility": {
+                "type": "object",
+                "properties": {
+                  "isDecorative": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "altText": {
+                    "type": "string"
+                  },
+                  "longDescription": {
+                    "type": "string"
+                  },
+                  "accessibleName": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "includedInReadingOrder": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "label",
+              "bounds",
+              "accessibility"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId",
+          "node"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "apply_diagram_layout",
+      "description": "Apply automatic layout to a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "layered",
+              "force",
+              "hierarchical"
+            ]
+          },
+          "seed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId",
+          "layout",
+          "seed"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "approve_alt_text",
+      "description": "Approve alt text for an image",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "altText": {
+            "type": "string",
+            "description": "Approved alt text"
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId",
+          "altText"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "approve_decision",
+      "description": "Approve a staged decision (human only)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "selectedOptionId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "decisionId",
+          "selectedOptionId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "approve_export_manifest",
+      "description": "Approve export manifest (requires approval token)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "exportJobId": {
+            "type": "string"
+          },
+          "approvalToken": {
+            "type": "string",
+            "description": "Approval token from user gesture"
+          }
+        },
+        "required": [
+          "projectId",
+          "exportJobId",
+          "approvalToken"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "assign_icon",
+      "description": "Assign an icon to a page",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "iconName": {
+            "type": "string",
+            "description": "Icon name from library"
+          },
+          "iconFamily": {
+            "type": "string",
+            "description": "Icon family"
+          },
+          "strokeWeight": {
+            "type": "number",
+            "exclusiveMinimum": true,
+            "minimum": 0,
+            "description": "Stroke weight"
+          },
+          "cornerStyle": {
+            "type": "string",
+            "description": "Corner style"
+          },
+          "fillStyle": {
+            "type": "string",
+            "description": "Fill style"
+          },
+          "sizeClass": {
+            "type": "string",
+            "description": "Size class"
+          },
+          "semanticAssignment": {
+            "type": "string",
+            "description": "Semantic meaning"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "anchorId": {
+                  "type": "string"
+                },
+                "relationship": {
+                  "type": "string",
+                  "enum": [
+                    "before",
+                    "after",
+                    "above",
+                    "below",
+                    "left_of",
+                    "right_of",
+                    "inside_same_region"
+                  ]
+                },
+                "spacing": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "anchorId",
+                "relationship"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "accessibility": {
+            "type": "object",
+            "properties": {
+              "isDecorative": {
+                "type": "boolean",
+                "default": false
+              },
+              "altText": {
+                "type": "string"
+              },
+              "longDescription": {
+                "type": "string"
+              },
+              "accessibleName": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "includedInReadingOrder": {
+                "type": "boolean",
+                "default": true
+              },
+              "language": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId",
+          "iconName",
+          "iconFamily",
+          "strokeWeight",
+          "cornerStyle",
+          "fillStyle",
+          "sizeClass"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "compare_images",
+      "description": "Compare multiple image candidates against criteria",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "assetIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 5,
+            "description": "Asset IDs to compare"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "intent_alignment",
+                "subject_relevance",
+                "composition",
+                "emotional_tone",
+                "professional_quality",
+                "representation",
+                "stereotype_framing",
+                "crop_flexibility",
+                "title_safe_area",
+                "distracting_details",
+                "visual_complexity",
+                "source_license",
+                "resolution",
+                "model_confidence"
+              ]
+            },
+            "default": [],
+            "description": "Comparison criteria"
+          }
+        },
+        "required": [
+          "projectId",
+          "assetIds"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": true
+      }
+    },
+    {
+      "name": "compare_visual_elements",
+      "description": "Compare visual elements",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "elementIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "projectId",
+          "elementIds"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "create_chart",
+      "description": "Create a chart from a dataset and spec",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "horizontal_bar",
+                  "vertical_bar",
+                  "line"
+                ],
+                "description": "Chart type"
+              },
+              "datasetId": {
+                "type": "string"
+              },
+              "xAxis": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "category",
+                      "value",
+                      "time"
+                    ]
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  },
+                  "baselineZero": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "title",
+                  "type"
+                ],
+                "additionalProperties": false
+              },
+              "yAxis": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "category",
+                      "value",
+                      "time"
+                    ]
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  },
+                  "baselineZero": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "title",
+                  "type"
+                ],
+                "additionalProperties": false
+              },
+              "series": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "dataColumnId": {
+                      "type": "string"
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^#[0-9A-Fa-f]{6}$"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "dashArray": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "dataColumnId",
+                    "color"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "subtitle": {
+                "type": "string"
+              },
+              "sourceNote": {
+                "type": "string"
+              },
+              "legendPosition": {
+                "type": "string",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "none"
+                ],
+                "default": "bottom"
+              }
+            },
+            "required": [
+              "type",
+              "datasetId",
+              "xAxis",
+              "yAxis",
+              "series",
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "anchorId": {
+                  "type": "string"
+                },
+                "relationship": {
+                  "type": "string",
+                  "enum": [
+                    "before",
+                    "after",
+                    "above",
+                    "below",
+                    "left_of",
+                    "right_of",
+                    "inside_same_region"
+                  ]
+                },
+                "spacing": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "anchorId",
+                "relationship"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "accessibility": {
+            "type": "object",
+            "properties": {
+              "isDecorative": {
+                "type": "boolean",
+                "default": false
+              },
+              "altText": {
+                "type": "string"
+              },
+              "longDescription": {
+                "type": "string"
+              },
+              "accessibleName": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "includedInReadingOrder": {
+                "type": "boolean",
+                "default": true
+              },
+              "language": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId",
+          "spec"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "create_decision",
+      "description": "Stage a visual decision for approval",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "page_structure",
+              "image_selection",
+              "image_crop",
+              "image_placement",
+              "icon_metaphor",
+              "icon_family",
+              "chart_type",
+              "chart_styling",
+              "diagram_structure",
+              "diagram_layout",
+              "template_selection",
+              "visual_priority",
+              "reading_order",
+              "alt_text",
+              "long_description",
+              "export_format"
+            ]
+          },
+          "targetObjectIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "targetPageIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "suggestedBy": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                }
+              },
+              "required": [
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "projectId",
+          "category",
+          "suggestedBy",
+          "options"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "create_diagram",
+      "description": "Create a diagram (process flow, decision tree, etc.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "process_flow",
+              "decision_tree",
+              "journey_map",
+              "system_architecture",
+              "org_structure"
+            ],
+            "description": "Diagram type"
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "layered",
+              "force",
+              "hierarchical"
+            ],
+            "default": "layered",
+            "description": "Layout algorithm"
+          },
+          "layoutSeed": {
+            "type": "integer",
+            "default": 42,
+            "description": "Deterministic layout seed"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "anchorId": {
+                  "type": "string"
+                },
+                "relationship": {
+                  "type": "string",
+                  "enum": [
+                    "before",
+                    "after",
+                    "above",
+                    "below",
+                    "left_of",
+                    "right_of",
+                    "inside_same_region"
+                  ]
+                },
+                "spacing": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "anchorId",
+                "relationship"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "accessibility": {
+            "type": "object",
+            "properties": {
+              "isDecorative": {
+                "type": "boolean",
+                "default": false
+              },
+              "altText": {
+                "type": "string"
+              },
+              "longDescription": {
+                "type": "string"
+              },
+              "accessibleName": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "includedInReadingOrder": {
+                "type": "boolean",
+                "default": true
+              },
+              "language": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "create_page",
+      "description": "Create a page from template",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "cover",
+              "text-led",
+              "text-side-image",
+              "full-width-image-caption",
+              "statistics",
+              "chart",
+              "diagram",
+              "participant-story",
+              "recommendations",
+              "conclusion-contact"
+            ],
+            "description": "Page template"
+          },
+          "insertAfter": {
+            "type": "string",
+            "description": "Page ID to insert after"
+          }
+        },
+        "required": [
+          "projectId",
+          "template"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "create_project",
+      "description": "Create a new document project with title, language, type, intent contract, and theme",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Project title"
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^[a-z]{2}(-[A-Z]{2})?$",
+            "default": "en",
+            "description": "BCP-47 language code"
+          },
+          "documentType": {
+            "type": "string",
+            "enum": [
+              "impact-report"
+            ],
+            "description": "Document type"
+          },
+          "intentContract": {
+            "type": "object",
+            "properties": {
+              "documentType": {
+                "type": "string",
+                "enum": [
+                  "impact-report"
+                ]
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "audience": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "primaryMessage": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "secondaryMessages": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "default": []
+              },
+              "tone": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "conceptsToAvoid": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "default": []
+              },
+              "brandColors": {
+                "type": "object",
+                "additionalProperties": false,
+                "default": {}
+              },
+              "brandFonts": {
+                "type": "object",
+                "additionalProperties": false,
+                "default": {}
+              },
+              "visualStyle": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "requiredVisuals": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "default": []
+              },
+              "accessibilityRequirements": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "default": []
+              },
+              "imageSourcingPreference": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "curated",
+                  "ai-generated",
+                  "mixed"
+                ],
+                "default": "mixed"
+              },
+              "privacySensitivity": {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ],
+                "default": "internal"
+              },
+              "exportRequirements": {
+                "type": "object",
+                "properties": {
+                  "pdf": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "html": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "svgDiagrams": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "chartTables": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "additionalProperties": false,
+                "default": {}
+              }
+            },
+            "required": [
+              "documentType",
+              "purpose",
+              "audience",
+              "primaryMessage",
+              "tone",
+              "visualStyle"
+            ],
+            "additionalProperties": false,
+            "description": "Intent contract defining document goals and constraints"
+          },
+          "theme": {
+            "type": "object",
+            "properties": {
+              "colors": {
+                "type": "object",
+                "additionalProperties": false
+              },
+              "fonts": {
+                "type": "object",
+                "additionalProperties": false
+              },
+              "spacing": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "colors",
+              "fonts",
+              "spacing"
+            ],
+            "additionalProperties": false,
+            "description": "Visual theme"
+          }
+        },
+        "required": [
+          "title",
+          "documentType",
+          "intentContract",
+          "theme"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "create_text_object",
+      "description": "Create a text object (heading, paragraph, list, etc.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "heading",
+              "paragraph",
+              "bulleted-list",
+              "numbered-list",
+              "quotation",
+              "callout",
+              "statistic-card",
+              "caption",
+              "footnote",
+              "source-note",
+              "page-break",
+              "section-break",
+              "hyperlink"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "description": "Text content"
+          },
+          "headingLevel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Heading level (1-4) for headings"
+          },
+          "listItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List items for lists"
+          },
+          "hyperlink": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL for hyperlinks"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "anchorId": {
+                  "type": "string"
+                },
+                "relationship": {
+                  "type": "string",
+                  "enum": [
+                    "before",
+                    "after",
+                    "above",
+                    "below",
+                    "left_of",
+                    "right_of",
+                    "inside_same_region"
+                  ]
+                },
+                "spacing": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "anchorId",
+                "relationship"
+              ],
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "Relative placement constraints"
+          },
+          "accessibility": {
+            "type": "object",
+            "properties": {
+              "isDecorative": {
+                "type": "boolean",
+                "default": false
+              },
+              "altText": {
+                "type": "string"
+              },
+              "longDescription": {
+                "type": "string"
+              },
+              "accessibleName": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "includedInReadingOrder": {
+                "type": "boolean",
+                "default": true
+              },
+              "language": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId",
+          "role",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "crop_image",
+      "description": "Register a semantic crop for an image",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "string"
+          },
+          "crop": {
+            "type": "object",
+            "properties": {
+              "rect": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "h": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              },
+              "aspectRatio": {
+                "type": "number",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "intent": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "rect",
+              "intent"
+            ],
+            "additionalProperties": false,
+            "description": "Crop specification"
+          }
+        },
+        "required": [
+          "projectId",
+          "assetId",
+          "crop"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "delete_chart",
+      "description": "Delete a chart",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "chartId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "chartId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "delete_diagram",
+      "description": "Delete a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "delete_icon",
+      "description": "Delete an icon",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "delete_page",
+      "description": "Delete a page",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "delete_project",
+      "description": "Delete a project",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "delete_text_object",
+      "description": "Delete a text object",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "describe_diagram",
+      "description": "Generate semantic/spatial description of a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "short",
+              "long",
+              "route_trace"
+            ],
+            "default": "long",
+            "description": "Description format"
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "dismiss_finding",
+      "description": "Dismiss a subjective finding",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "findingId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "findingId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "encrypt_project",
+      "description": "Encrypt project with passphrase",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "passphrase": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "description": "Encryption passphrase"
+          }
+        },
+        "required": [
+          "projectId",
+          "passphrase"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "export_diagram",
+      "description": "Export diagram as SVG, PNG, HTML, or tactile profile",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "svg",
+              "png",
+              "html",
+              "tactile"
+            ],
+            "default": "svg"
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "finalize_export",
+      "description": "Finalize export (requires approval token)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "exportJobId": {
+            "type": "string"
+          },
+          "approvalToken": {
+            "type": "string",
+            "description": "Approval token from user gesture"
+          }
+        },
+        "required": [
+          "projectId",
+          "exportJobId",
+          "approvalToken"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_charts",
+      "description": "Get all charts",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_decisions",
+      "description": "Get visual decisions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "proposed",
+              "approved",
+              "rejected",
+              "stale"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "page_structure",
+              "image_selection",
+              "image_crop",
+              "image_placement",
+              "icon_metaphor",
+              "icon_family",
+              "chart_type",
+              "chart_styling",
+              "diagram_structure",
+              "diagram_layout",
+              "template_selection",
+              "visual_priority",
+              "reading_order",
+              "alt_text",
+              "long_description",
+              "export_format"
+            ]
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_diagrams",
+      "description": "Get all diagrams",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_document_overview",
+      "description": "Get document overview",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_export_jobs",
+      "description": "Get export jobs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_findings",
+      "description": "Get validation findings",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "object",
+              "page",
+              "document"
+            ]
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error",
+              "blocking"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "accepted",
+              "resolved",
+              "dismissed"
+            ]
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_icon_system",
+      "description": "Get document-wide icon system",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_image_assets",
+      "description": "Get all image assets",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_project",
+      "description": "Get project details",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_project_status",
+      "description": "Get document lifecycle status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_text_objects",
+      "description": "Get text objects",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "get_validation_summary",
+      "description": "Get validation summary for export",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "identify_accessibility_defects",
+      "description": "Identify accessibility defects in imported document",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "import_dataset",
+      "description": "Import a dataset from CSV, manual entry, or pasted table",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Dataset name"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "csv_upload",
+              "manual_entry",
+              "pasted_table",
+              "extracted_table"
+            ],
+            "description": "Data source"
+          },
+          "data": {
+            "type": "string",
+            "description": "CSV text or JSON data"
+          },
+          "sourceReference": {
+            "type": "string",
+            "description": "Source reference"
+          }
+        },
+        "required": [
+          "projectId",
+          "name",
+          "source",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": true
+      }
+    },
+    {
+      "name": "import_digital_pdf",
+      "description": "Import a digital PDF for understanding",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pdfData": {
+            "description": "PDF binary data"
+          }
+        },
+        "required": [
+          "projectId",
+          "pdfData"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": true
+      }
+    },
+    {
+      "name": "import_project",
+      "description": "Import project from serialized data",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "projectData": {
+            "type": "string",
+            "description": "Serialized project JSON"
+          },
+          "sourceHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "SHA-256 of source"
+          }
+        },
+        "required": [
+          "projectId",
+          "projectData",
+          "sourceHash"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": true
+      }
+    },
+    {
+      "name": "inspect_image",
+      "description": "Get structured analysis context for an image",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "assetId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "List all projects",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "lock_document",
+      "description": "Lock document for export (requires manifest hash)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "manifestHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "SHA-256 of export manifest"
+          }
+        },
+        "required": [
+          "projectId",
+          "manifestHash"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "move_object",
+      "description": "Move an object to another page",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "toPageId": {
+            "type": "string"
+          },
+          "insertAfter": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId",
+          "toPageId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "narrate_page",
+      "description": "Get semantic and spatial narration of a page",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "navigate_semantic",
+      "description": "Navigate document semantically",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "page",
+              "heading",
+              "paragraph",
+              "image",
+              "chart",
+              "diagram",
+              "table",
+              "icon",
+              "caption",
+              "footnote",
+              "warning",
+              "unapproved",
+              "agent-created"
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "by"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "preview_export_manifest",
+      "description": "Preview export manifest",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "recommend_chart_types",
+      "description": "Get deterministic chart type recommendations for a dataset",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "datasetId": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string",
+            "enum": [
+              "comparison",
+              "trend",
+              "composition",
+              "distribution",
+              "relationship"
+            ],
+            "description": "Chart goal"
+          }
+        },
+        "required": [
+          "projectId",
+          "datasetId",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "record_image_analysis",
+      "description": "Record structured image analysis (observations/interpretations/uncertainties)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "string"
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "claim": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "basis": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "claim",
+                "confidence",
+                "basis"
+              ],
+              "additionalProperties": false
+            },
+            "description": "High-confidence observations"
+          },
+          "interpretations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "claim": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "model": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                }
+              },
+              "required": [
+                "claim",
+                "confidence",
+                "model"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Model interpretations"
+          },
+          "uncertainties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "claim": {
+                  "type": "string"
+                },
+                "analyses": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                },
+                "recommendation": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "claim",
+                "recommendation"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Uncertainties and disagreements"
+          }
+        },
+        "required": [
+          "projectId",
+          "assetId",
+          "observations",
+          "interpretations",
+          "uncertainties"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "reject_decision",
+      "description": "Reject a staged decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Rejection reason"
+          }
+        },
+        "required": [
+          "projectId",
+          "decisionId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "reorder_pages",
+      "description": "Reorder pages",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageOrder": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New page order"
+          }
+        },
+        "required": [
+          "projectId",
+          "pageOrder"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "reorder_text_objects",
+      "description": "Reorder text objects in reading order",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "readingOrder": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New reading order"
+          }
+        },
+        "required": [
+          "projectId",
+          "pageId",
+          "readingOrder"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "request_decision_alternatives",
+      "description": "Request new alternatives for a rejected decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "decisionId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "request_review",
+      "description": "Request review transition (draft → review)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "resolve_finding",
+      "description": "Mark a finding as resolved",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "findingId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "findingId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "run_validation",
+      "description": "Run full validation suite",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "object",
+              "page",
+              "document"
+            ]
+          },
+          "targetId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "search_icons",
+      "description": "Search icons by meaning",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query for icon meaning"
+          },
+          "family": {
+            "type": "string",
+            "description": "Icon family filter"
+          }
+        },
+        "required": [
+          "projectId",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "set_object_constraints",
+      "description": "Set relative placement constraints for an object",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "anchorId": {
+                  "type": "string"
+                },
+                "relationship": {
+                  "type": "string",
+                  "enum": [
+                    "before",
+                    "after",
+                    "above",
+                    "below",
+                    "left_of",
+                    "right_of",
+                    "inside_same_region"
+                  ]
+                },
+                "spacing": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "anchorId",
+                "relationship"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Relative constraints"
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId",
+          "constraints"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "unlock_document",
+      "description": "Unlock document (human only)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "update_chart",
+      "description": "Update a chart",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "chartId": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Chart updates"
+          }
+        },
+        "required": [
+          "projectId",
+          "chartId",
+          "changes"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "update_diagram",
+      "description": "Update a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Diagram updates"
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId",
+          "changes"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "update_icon",
+      "description": "Update an icon",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Icon updates"
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId",
+          "changes"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "update_project",
+      "description": "Update project metadata",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Partial project updates"
+          }
+        },
+        "required": [
+          "projectId",
+          "changes"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "update_text_object",
+      "description": "Update a text object",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "headingLevel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "listItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hyperlink": {
+            "type": "string",
+            "format": "uri"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "anchorId": {
+                  "type": "string"
+                },
+                "relationship": {
+                  "type": "string",
+                  "enum": [
+                    "before",
+                    "after",
+                    "above",
+                    "below",
+                    "left_of",
+                    "right_of",
+                    "inside_same_region"
+                  ]
+                },
+                "spacing": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "anchorId",
+                "relationship"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "accessibility": {
+            "type": "object",
+            "properties": {
+              "isDecorative": {
+                "type": "boolean",
+                "default": false
+              },
+              "altText": {
+                "type": "string"
+              },
+              "longDescription": {
+                "type": "string"
+              },
+              "accessibleName": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "includedInReadingOrder": {
+                "type": "boolean",
+                "default": true
+              },
+              "language": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "projectId",
+          "objectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "upload_image",
+      "description": "Upload an image asset",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string",
+            "description": "Original file name"
+          },
+          "mimeType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "image/svg+xml"
+            ],
+            "description": "MIME type"
+          },
+          "data": {
+            "description": "Image binary data"
+          },
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "upload",
+              "organization_library",
+              "curated_provider",
+              "ai_generated",
+              "imported"
+            ],
+            "description": "Source type"
+          },
+          "sourceReference": {
+            "type": "string",
+            "description": "Source URL or reference"
+          },
+          "license": {
+            "type": "string",
+            "description": "License information"
+          }
+        },
+        "required": [
+          "projectId",
+          "fileName",
+          "mimeType",
+          "data",
+          "sourceType"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "untrustedContentHint": true
+      }
+    },
+    {
+      "name": "validate_chart",
+      "description": "Run integrity checks on a chart",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "chartId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "chartId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "validate_diagram",
+      "description": "Run structural and visual validation on a diagram",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "diagramId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "diagramId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    },
+    {
+      "name": "validate_icons",
+      "description": "Run icon consistency checks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "untrustedContentHint": false
+      }
+    }
+  ]
+}

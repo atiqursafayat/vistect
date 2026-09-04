@@ -2,7 +2,9 @@
 // Agent Activity Recorder
 // ============================================================================
 
-import type { DocumentProject, ActorId, Hash } from '@vistect/domain/schema';
+import type { ActorId } from '@vistect/domain/schema';
+import { nanoid } from 'nanoid';
+
 
 // ============================================================================
 // Activity Types
@@ -49,7 +51,7 @@ export function createActivityRecorder(): ActivityRecorder {
     record(entry) {
       const fullEntry: AgentActivityEntry = {
         ...entry,
-        id: `act_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`,
+        id: `aact_${nanoid(12)}`,
         timestamp: new Date().toISOString(),
       };
 
@@ -132,7 +134,7 @@ export function createActivityStream(projectId: string, recorder: ReturnType<typ
       return recorder.getEntries({ status: 'error', limit });
     },
 
-    getForActor(actorId: string, limit = 100) {
+    getForActor(actorId: ActorId, limit = 100) {
       return recorder.getEntries({ actorId, limit });
     },
 

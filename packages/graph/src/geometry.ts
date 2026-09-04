@@ -1,12 +1,18 @@
 // ============================================================================
 // Graph Geometry - Bounds, Intersection, Distance
 // ============================================================================
+//
+// Pure planar geometry used by layout validation (edge crossings, node overlap,
+// label collision). `Bounds` is re-exported from the domain schema so geometry
+// results can flow into findings without conversion.
 
-export interface Bounds {
+import type { Bounds } from '@vistect/domain/schema';
+
+export type { Bounds };
+
+export interface Point {
   x: number;
   y: number;
-  w: number;
-  h: number;
 }
 
 export function boundsOverlap(a: Bounds, b: Bounds): boolean {
@@ -23,7 +29,7 @@ export function boundsWithin(inner: Bounds, outer: Bounds): boolean {
          inner.y + inner.h <= outer.y + outer.h;
 }
 
-export function getBoundsCenter(bounds: Bounds): { x: number; y: number } {
+export function getBoundsCenter(bounds: Bounds): Point {
   return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
 }
 
@@ -65,18 +71,19 @@ export function boundsFromNodes(nodes: { bounds: Bounds }[]): Bounds {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-export function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+export function distance(a: Point, b: Point): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-export function segmentIntersection(
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  p3: { x: number; y: number },
-  p4: { x: number; y: number }
-): { x: number; y: number } | null {
+/**
+ * Intersection point of two line segments, or `null` when they do not cross.
+ *
+ * Collinear-overlapping segments return `null` (the determinant is zero); they
+ * are reported separately as an overlap, not a crossing.
+ */
+export function segmentIntersection(p1: Point, p2: Point, p3: Point, p4: Point): Point | null {
   const x1 = p1.x, y1 = p1.y;
   const x2 = p2.x, y2 = p2.y;
   const x3 = p3.x, y3 = p3.y;
@@ -94,18 +101,19 @@ export function segmentIntersection(
   return null;
 }
 
-export function countEdgeCrossings(edges: Array<{ from: { x: number; y: number }; to: { x: number; y: number } }>): number {
+/** Number of pairwise crossings among the given segments. */
+export function countEdgeCrossings(edges: { from: Point; to: Point }[]): number {
   let crossings = 0;
   for (let i = 0; i < edges.length; i++) {
+    const a = edges[i];
+    if (a === undefined) continue;
     for (let j = i + 1; j < edges.length; j++) {
-      if (segmentIntersection(edges[i].from, edges[i].to, edges[j].from, edges[j].to)) {
+      const b = edges[j];
+      if (b === undefined) continue;
+      if (segmentIntersection(a.from, a.to, b.from, b.to) !== null) {
         crossings++;
       }
     }
   }
   return crossings;
-}
-
-export function aabbOverlap(a: Bounds, b: Bounds): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
