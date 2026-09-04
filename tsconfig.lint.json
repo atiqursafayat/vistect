@@ -1,0 +1,31 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "*.ts",
+    "*.js",
+    "**/vitest.setup.ts",
+    "**/tests/**/*.ts",
+    "**/tests/**/*.tsx",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.config.ts",
+    "packages/*/scripts/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/dist/**"
+  ]
+}

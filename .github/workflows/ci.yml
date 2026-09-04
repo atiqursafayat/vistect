@@ -53,6 +53,8 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
+      # `--coverage` so the 80% thresholds in apps/web/vitest.config.ts are
+      # actually enforced. Without it they are configured but never evaluated.
       - run: pnpm test:unit --coverage
 
   build:
@@ -91,7 +93,11 @@ jobs:
         if: failure()
         with:
           name: playwright-report
-          path: apps/web/tests/e2e/playwright-report
+          # Playwright writes the HTML report next to its config (apps/web), not
+          # under testDir. Pointing at tests/e2e/ meant failures uploaded nothing.
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
           retention-days: 7
 
   audit:
@@ -112,7 +118,6 @@ jobs:
   pins:
     name: Registry Snapshot Check
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
